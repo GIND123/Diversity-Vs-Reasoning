@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: correctness
+        name: blocking correctness harness
+        entry: .venv/bin/python -m pytest -m correctness tests
+        language: system
+        pass_filenames: false
+        always_run: true
+

@@ -1,0 +1,71 @@
+project:
+  name: diversity-vs-reasoning
+  seed: 0
+  cache_dir: cache
+  data_dir: data
+  output_dir: outputs
+  gate_stamp: .correctness-gate
+
+generation:
+  chains_per_question: 1024
+  budgets: [4, 8, 16, 32, 64, 128, 256, 512, 1024]
+  seeds: [0, 1, 2]
+  main_seed: 0
+  temperature: 1.0
+  top_p: 0.95
+  max_new_tokens: 400
+  spot_check_questions: 50
+
+hf:
+  dataset_repo: GOVINDFROM/Diversity-vs-Reasoning
+  private: true
+  token_env: HF_TOKEN
+  shard_questions: 16
+
+modal:
+  app_name: diversity-vs-reasoning-generation
+  bank_volume: dvr-chain-bank
+  hf_cache_volume: dvr-hf-cache
+  vllm_version: "0.11.0"
+  gpu_small: L40S
+  gpu_large: H100
+  large_model_threshold_b: 5.0
+  max_model_len: 2048
+  gpu_memory_utilization_pct: 90
+  micro_batch_chains: 128
+  max_containers: 8
+
+selection:
+  pool_sizes: [40, 1024]
+  output_budgets: [2, 3, 4, 8, 16, 32]
+  q_orders: [0, 0.1, 0.5, 1.0, 2.0, inf]
+  objectives:
+    - vendi_0
+    - vendi_0.1
+    - vendi_0.5
+    - vendi_1
+    - vendi_2
+    - vendi_inf
+    - pseudo_logdet
+    - facility_location
+    - random
+  random_seeds: 20
+
+kernels:
+  families: [embedding, answer, mixed]
+  alphas: [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]
+  eigenvalue_threshold: 1.0e-10
+  threshold_sensitivity: [1.0e-8, 1.0e-12]
+  anisotropy_components: [0, 1, 2, 3]
+
+embeddings:
+  primary: BAAI/bge-large-en-v1.5
+  checks:
+    - allenai/specter2
+    - mixedbread-ai/mxbai-embed-large-v1
+
+statistics:
+  bootstrap_replicates: 1000
+  practical_null: 0.01
+  confidence_level: 0.95
+

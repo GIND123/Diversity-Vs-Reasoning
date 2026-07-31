@@ -1,0 +1,52 @@
+models:
+  - id: Qwen/Qwen2.5-0.5B-Instruct
+    short_name: qwen2.5-0.5b
+    params_b: 0.5
+    gpu: L40S
+  - id: Qwen/Qwen2.5-1.5B-Instruct
+    short_name: qwen2.5-1.5b
+    params_b: 1.5
+    gpu: L40S
+  - id: Qwen/Qwen2.5-3B-Instruct
+    short_name: qwen2.5-3b
+    params_b: 3.0
+    gpu: L40S
+  - id: Qwen/Qwen2.5-7B-Instruct
+    short_name: qwen2.5-7b
+    params_b: 7.0
+    gpu: H100
+  - id: meta-llama/Llama-3.2-3B-Instruct
+    short_name: llama-3.2-3b  # matches modal_app.model_short_name
+    params_b: 3.0
+    gpu: L40S
+    gated: true
+    access: granted
+  - id: google/gemma-2-2b-it
+    short_name: gemma2-2b
+    params_b: 2.6
+    gpu: L40S
+    gated: true
+    access: granted
+
+datasets:
+  - id: openai/gsm8k
+    key: gsm8k
+    config: main
+    split: test
+    evaluator: gsm8k
+  - id: EleutherAI/hendrycks_math
+    key: math
+    split: test
+    evaluator: math
+    levels: [1, 2, 3, 4, 5]
+    configs:
+      - algebra
+      - counting_and_probability
+      - geometry
+      - intermediate_algebra
+      - number_theory
+      - prealgebra
+      - precalculus
+    # Replaces lighteval/MATH, which was removed from the Hub (404 as of 2026-07-30).
+    # Same Hendrycks MATH test split with Level 1-5 metadata, so Part B is unchanged.
+    replaces: lighteval/MATH

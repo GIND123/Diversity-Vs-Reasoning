@@ -1,4 +1,109 @@
-# Diversity-Vs-Reasoning
+# Diversity vs. Coverage: Which Is Best for LLM Reasoning?
+
+Selecting reasoning chains to maximize **diversity** — the Vendi Score family
+[VS_q](https://github.com/vertaix/Vendi-Score), the exponential of the Rényi
+entropy of order *q* of a normalized similarity-kernel spectrum — or to maximize
+**coverage** — the pseudo log-determinant, the sum of the logs of the nonzero
+eigenvalues of the same kernel: which wins, for which aspect of reasoning, and
+under which conditions? Every order *q*, including the *q* → 0 richness limit,
+is a diversity measure; coverage is a separate functional, never a member of the
+family.
+
+<p align="center">
+  <img src="assets/P-2a.png" width="92%" alt="Accuracy vs selection budget for each objective against the 20-seed random band, per aggregation rule">
+</p>
+<p align="center"><em>The lead comparison: accuracy vs. selection budget for greedy VS_1, greedy VS_inf, greedy coverage (pseudo log-determinant), and facility location, against the 20-seed random band, under all three aggregation rules.</em></p>
+
+## Study design
+
+| Axis | Values |
+|---|---|
+| **Diversity orders** | VS_q with **q ∈ {0, 0.1, 0.5, 1.0, 2.0, ∞}**, computed via the pinned [vertaix/Vendi-Score](https://github.com/vertaix/Vendi-Score) implementation |
+| **Coverage** | pseudo log-determinant (sum of logs of nonzero eigenvalues); raw-spectrum form for selection, T4-pinned normalized form for measurement; τ sensitivity at {1e-8, 1e-10, 1e-12} |
+| **Reference selectors** | facility location (representativeness); random (20 seeds, the baseline in every comparison) |
+| **Models** | Qwen2.5-0.5B-Instruct · Qwen2.5-1.5B-Instruct · Llama-3.2-3B-Instruct (pass@1 spanning 0.30 → 0.71) |
+| **Datasets** | GSM8K test (96 questions) · MATH levels 1–5 (60 questions, 12 per level, level-stratified) |
+| **Chain banks** | 1024 chains per question; temperature 1.0, top-p 0.95; 400 new tokens (GSM8K) / 1024 (MATH, truncation-audited); vLLM on A100 |
+| **Kernels** | K_emb (question-centred primary; raw and corpus-anisotropy arms as ablations) · K_ans (sympy answer-equivalence classes) · K_α = αK_ans + (1−α)K_emb, α ∈ {0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0} |
+| **Selection** | greedy per objective (batched, provably identical to naive greedy); budgets k ∈ {2, 3, 4, 8, 16, 32}; pools of 40 and 1024; every arm averaged over 5 subsample draws |
+| **Aggregation rules** | majority vote (logprob tie-break) · pass@k · verifier best-of-n (mean token logprob) |
+| **Hardness strata** | Snell bins on pass@1 (terciles headline, quintiles appendix) · MATH level 1–5 · answer entropy |
+| **Tail-heaviness strata** | rank of the correct answer in the 1024-chain distribution: modal (1) · minority (2–5) · tail (>5) · absent |
+| **Subsample budgets** | n ∈ {4, 8, 16, 32, 64, 128, 256, 512, 1024} per question, seeded |
+| **Encoder** | bge-large-en-v1.5 (mxbai-embed-large-v1 rank-stability check) |
+| **Statistics** | paired question-level bootstrap (1000 replicates) vs. random · Holm within families · cross-model replication as the evidence standard · practical-null at \|δ\| < 0.01 |
+
+## Selected findings
+
+<p align="center">
+  <img src="assets/P-1e.png" width="85%" alt="Simpson-style reversal between the two log functionals">
+</p>
+
+**The two log functionals disagree by scope.** Within a fixed budget,
+log VS_q and coverage correlate strongly positively (r up to +0.998); pooled
+across budgets the correlation flips negative — a Simpson-style reversal. The
+ε = 1 log-det variant destroys the effect, and on the answer kernel the two
+functionals are anti-correlated at *every* scope: the reversal is a property of
+continuous kernels.
+
+<p align="center">
+  <img src="assets/P-A4.png" width="92%" alt="Embedding-kernel concentration is question-specific">
+</p>
+
+**Measuring diversity among chains requires removing the question.** Every
+chain in a pool answers the same question, so the raw embedding kernel is
+dominated by that question's own content (top eigenvalue ≈ 94% of the spectrum;
+VS_1 ≈ 1.4 among 40 genuinely different chains — the "identical items" floor of
+the effective-number axiom). Corpus-level anisotropy correction barely helps;
+re-expressing chains as deviations from their own question's centroid restores
+VS_1 ≈ 9 and lets selectors separate. Replicates across all three models.
+
+<p align="center">
+  <img src="assets/P-2f.png" width="80%" alt="q-inertness on the answer kernel">
+</p>
+
+**On the answer kernel, q is inert by construction** (the
+Similarity-Eigenvalue-Prevalence theorem): at budgets at or below the number of
+distinct answers, every order q selects the same chains.
+
+**Headroom governs everything.** VS_∞ improves pass@k where the model is weak
+(+0.031 and +0.020 with CIs excluding zero on the two weaker models) and the
+effect vanishes as random selection approaches ceiling (95% at k = 8 on the
+strongest model). Selection objectives matter exactly where models leave room.
+
+Full numbers, hypothesis strip, and limitations: [RESULTS.md](RESULTS.md).
+Alignment with the defining papers, equation-by-equation: [LITERATURE.md](LITERATURE.md).
+Every deviation and its justification: [TRIAGE.md](TRIAGE.md).
+
+## Data
+
+All chain banks (1024 chains × question, with embeddings, per-chain logprobs,
+and provenance manifests) live in the Hugging Face dataset
+[`GOVINDFROM/Diversity-vs-Reasoning`](https://huggingface.co/datasets/GOVINDFROM/Diversity-vs-Reasoning).
+
+## Reproduce
+
+```bash
+make bootstrap                      # environment (pins Vendi-Score commit)
+make gate                          # blocking correctness harness (T1-T11 + paper alignment)
+zsh scripts/run_campaign.sh        # generate chain banks on Modal (A100)
+python scripts/run_analysis.py all # pull banks, analyse every cell, assemble
+python figures/render_paper.py     # every figure (PDF + PNG) from cache only
+python scripts/write_results.py    # RESULTS.md, no hand-entered numbers
+```
+
+No number enters a figure, table, or results file by hand: everything
+regenerates from `cache/`.
+
+## References
+
+- Friedman & Dieng, *The Vendi Score: A Diversity Evaluation Metric for Machine Learning* (arXiv:2210.02410)
+- Pasarkar & Dieng, *Cousins of the Vendi Score: A Family of Similarity-Based Diversity Metrics*, AISTATS 2024 (arXiv:2310.12952)
+- Rezaei & Dieng, *Vendi-RAG* (arXiv:2502.11228)
+- Bilmes, Bhatt & Das, *How Much Is a Dataset Worth?* (arXiv:2605.29448)
+- Deprez et al., *Diversity by Chance: Rethinking the Need for DPPs in Active Learning* (SciTePress, 2026)
+
+---
 
 # Diversity vs. Coverage: Which Is Best for LLM Reasoning?
 ## Technical Blueprint (v2 — expands the scope document; nothing removed, everything specified)

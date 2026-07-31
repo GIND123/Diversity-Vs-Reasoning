@@ -1,0 +1,42 @@
+# Secrets and local environment overrides
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Generated research artifacts (directory placeholders remain tracked)
+cache/**
+!cache/.gitkeep
+data/**
+!data/.gitkeep
+outputs/**
+!outputs/.gitkeep
+figures/generated/**
+!figures/generated/.gitkeep
+.correctness-gate
+
+# Model and experiment outputs
+wandb/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+

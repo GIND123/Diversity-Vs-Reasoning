@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diversity-vs-reasoning"
+version = "0.1.0"
+description = "Research pipeline comparing diversity and coverage objectives for LLM reasoning."
+requires-python = ">=3.9"
+dependencies = [
+  "numpy>=1.24,<3",
+  "PyYAML>=6.0,<7",
+  "scipy>=1.10,<2",
+  "scikit-learn>=1.1,<2",
+  "sympy>=1.12,<2",
+  "vendi-score @ git+https://github.com/vertaix/Vendi-Score.git@ff1dfdbe6356b98a6087540f215b9a9db6db7c11",
+]
+
+[project.optional-dependencies]
+generation = [
+  "accelerate>=0.30",
+  "datasets>=2.19",
+  "huggingface-hub>=0.34,<2",
+  "sentence-transformers>=3.0",
+  "torch>=2.2",
+  "transformers>=4.44",
+]
+hub = [
+  "huggingface-hub>=0.34,<2",
+]
+modal = [
+  "huggingface-hub>=0.34,<2",
+  "modal>=1.0,<2",
+]
+analysis = [
+  "matplotlib>=3.8",
+  "pandas>=2.1",
+  "seaborn>=0.13",
+  "statsmodels>=0.14",
+]
+dev = [
+  "mypy>=1.10",
+  "pre-commit>=3.7",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  "types-PyYAML>=6.0",
+]
+[project.scripts]
+dvr = "diversity_reasoning.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "correctness: blocking correctness-harness test",
+  "slow: test that is excluded from the default local gate",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["UP006", "UP007", "UP035", "UP045"]
+
+[tool.mypy]
+python_version = "3.9"
+packages = ["diversity_reasoning"]
+strict = true
+warn_unused_ignores = true
+
+# Generation-only dependencies are absent from the analysis environment and are
+# imported lazily inside the functions that need them.
+[[tool.mypy.overrides]]
+module = ["datasets.*", "huggingface_hub.*", "scipy.*", "sympy.*"]
+ignore_missing_imports = true
