@@ -919,6 +919,64 @@ def render_p3c() -> None:
 # --------------------------------------------------------------------------
 
 
+def render_p2g() -> None:
+    """P-2g: the share of winnable questions predicts the achievable gain.
+
+    A selector cannot lose a question whose correct answer is already modal and
+    cannot win one where it is absent. Only the present-but-not-modal group is
+    winnable, so its share should bound what any objective can deliver.
+    """
+    payload = load("P-2g")
+    if not payload or not payload.get("points"):
+        return
+    points = payload["points"]
+    correlations = payload.get("correlations", {})
+    rules = [r for r in ("majority_vote", "pass_at_k") if any(p["rule"] == r for p in points)]
+    if not rules:
+        return
+    figure, axes = plt.subplots(1, 2, figsize=(7.4, 3.1), sharey=True)
+    for ax, predictor, xlabel in zip(
+        axes,
+        ("winnable_fraction", "headroom"),
+        ("winnable share (answer present, not modal)", "headroom (1 - random accuracy)"),
+    ):
+        for rule, marker in zip(rules, ("o", "s")):
+            subset = [p for p in points if p["rule"] == rule]
+            colour = Q_COLORS["1"] if rule == "majority_vote" else COVERAGE
+            ax.errorbar(
+                [p[predictor] for p in subset],
+                [p["best_delta"] for p in subset],
+                yerr=[
+                    [p["best_delta"] - p["ci_low"] for p in subset],
+                    [p["ci_high"] - p["best_delta"] for p in subset],
+                ],
+                fmt=marker,
+                color=colour,
+                markersize=5,
+                linewidth=0,
+                elinewidth=0.7,
+                ecolor=NEUTRAL,
+                label=RULE_LABEL[rule],
+            )
+            stats = correlations.get(f"{rule}|{predictor}")
+            if stats:
+                ax.plot([], [], " ", label=f"   r = {stats['pearson']:+.2f} (n={stats['n']})")
+        ax.axhline(0, color=NEUTRAL, linewidth=0.8)
+        ax.set_xlabel(xlabel)
+        ax.set_xlim(left=0)
+    axes[0].set_ylabel("best $\\Delta$ vs random (k=8)")
+    axes[0].set_title("Winnable share", fontsize=8.5)
+    axes[1].set_title("Headroom", fontsize=8.5)
+    axes[0].legend(fontsize=6, loc="upper left")
+    axes[1].legend(fontsize=6, loc="upper left")
+    figure.suptitle(
+        "What bounds the gain from selection: winnable share, not headroom",
+        y=1.03,
+        fontsize=9,
+    )
+    save(figure, "P-2g")
+
+
 def render_pa4() -> None:
     """P-A4: the embedding kernel's concentration is question-specific.
 
@@ -1091,6 +1149,8 @@ def write_tables() -> None:
         ("tb4_alpha_star", "TB-4"),
         ("tb5_signals", "TB-5"),
         ("tb6_operating_points", "TB-6"),
+        ("tb7_encoder_stability", "TB-7"),
+        ("seed_variance", "TB-8"),
     ):
         data = load_table(name)
         if data is None:
@@ -1118,6 +1178,7 @@ def main() -> int:
     render_p2e()
     render_p2d()
     render_p2f()
+    render_p2g()
     render_p3a()
     render_p3b()
     render_p3c()

@@ -159,18 +159,23 @@ def stage_cell(model: str, dataset: str) -> Dict[str, Any]:
         "embedding:c1",  # ablation: corpus-level anisotropy correction
         "answer",
     ] + [f"alpha:{a}:qc" for a in ALPHA_GRID]
-    pool40 = [question_outcomes(pool, pool_size=40, kernels=kernels_full) for pool in pools]
-    _write(out / "outcomes_pool40.json", pool40)
-
-    pool_full = [
-        question_outcomes(
-            pool,
-            pool_size=10**9,
-            kernels=["embedding_qc", "answer"],
-            objectives=list(CORE_OBJECTIVES),
+    # Both selection sweeps are done per pool, then that pool's kernel caches are
+    # released. Holding them for every pool costs ~75 MB each and pushes a
+    # 192-question cell past RAM into swap.
+    pool40: List[Dict[str, Any]] = []
+    pool_full: List[Dict[str, Any]] = []
+    for pool in pools:
+        pool40.append(question_outcomes(pool, pool_size=40, kernels=kernels_full))
+        pool_full.append(
+            question_outcomes(
+                pool,
+                pool_size=10**9,
+                kernels=["embedding_qc", "answer"],
+                objectives=list(CORE_OBJECTIVES),
+            )
         )
-        for pool in pools
-    ]
+        pool.release_caches()
+    _write(out / "outcomes_pool40.json", pool40)
     _write(out / "outcomes_pool1024.json", pool_full)
 
     elapsed = time.time() - started
@@ -688,6 +693,82 @@ def _tau_sensitivity(spectra_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return result
 
 
+def assemble_winnable() -> None:
+    """P-2g: what governs how much any selection objective can gain.
+
+    The blueprint's tail-heaviness taxonomy partitions questions into ones a
+    selector cannot lose (correct answer is already modal), cannot win (absent
+    from the pool entirely), and can actually win — correct answer present but
+    not modal. The last group is the only place a selection objective has work
+    to do, so its share should predict the achievable gain better than raw
+    headroom does. Both are reported so the comparison is visible.
+    """
+    strata = _load(TABLES / "tb0_strata.json") if (TABLES / "tb0_strata.json").exists() else {}
+    conditioning = (
+        _load(TABLES / "r_conditioning_full.json")
+        if (TABLES / "r_conditioning_full.json").exists()
+        else []
+    )
+    if not strata or not conditioning:
+        return
+    points: List[Dict[str, Any]] = []
+    for cell_id, data in sorted(strata.items()):
+        model, dataset = cell_id.split("|")
+        counts = data.get("tail_counts", {})
+        total = sum(counts.values())
+        if not total:
+            continue
+        winnable = (counts.get("minority", 0) + counts.get("tail", 0)) / total
+        for rule in RULES:
+            candidates = [
+                row
+                for row in conditioning
+                if row["model"] == model
+                and row["dataset"] == dataset
+                and row["rule"] == rule
+                and row["group"] == "all"
+                and not row.get("degenerate_on_this_kernel")
+            ]
+            if not candidates:
+                continue
+            best = max(candidates, key=lambda row: row["delta"])
+            points.append(
+                {
+                    "cell": cell_id,
+                    "model": model,
+                    "dataset": dataset,
+                    "rule": rule,
+                    "winnable_fraction": winnable,
+                    "headroom": 1.0 - best["random_accuracy"],
+                    "modal_fraction": counts.get("modal", 0) / total,
+                    "absent_fraction": counts.get("absent", 0) / total,
+                    "best_delta": best["delta"],
+                    "best_objective": best["objective"],
+                    "ci_low": best["ci_low"],
+                    "ci_high": best["ci_high"],
+                }
+            )
+    correlations: Dict[str, Any] = {}
+    if len(points) >= 4:
+        from scipy.stats import pearsonr, spearmanr
+
+        for rule in RULES:
+            subset = [p for p in points if p["rule"] == rule]
+            if len(subset) < 4:
+                continue
+            deltas = np.asarray([p["best_delta"] for p in subset])
+            for name in ("winnable_fraction", "headroom"):
+                predictor = np.asarray([p[name] for p in subset])
+                if np.std(predictor) == 0:
+                    continue
+                correlations[f"{rule}|{name}"] = {
+                    "pearson": float(pearsonr(predictor, deltas).statistic),
+                    "spearman": float(spearmanr(predictor, deltas).statistic),
+                    "n": len(subset),
+                }
+    _write(FIGURE_DATA / "P-2g.json", {"points": points, "correlations": correlations})
+
+
 def assemble_signals() -> None:
     from diversity_reasoning.signals import r6_signal_shootout, r7_escalation
 
@@ -740,6 +821,72 @@ def assemble_signals() -> None:
     )
 
 
+def stage_seed_variance(
+    model: str = "qwen2.5-0.5b",
+    dataset: str = "gsm8k",
+    seeds: Sequence[str] = ("", "-g1", "-g2"),
+) -> None:
+    """B1 spot check: does the generation seed change what a bank measures?
+
+    Compares the main bank (g = 0) against the -g1/-g2 suffix banks on their
+    shared questions: per-question pass@1 spread across seeds, answer-entropy
+    spread, and tail-heaviness label agreement. This bounds bank-level
+    generation variance, which is otherwise a stated limitation.
+    """
+    from diversity_reasoning.pools import load_cell
+    from diversity_reasoning.spectra import answer_entropy
+    from diversity_reasoning.strata import tail_heaviness
+
+    per_seed: Dict[str, Dict[str, Any]] = {}
+    for suffix in seeds:
+        try:
+            pools = load_cell(CACHE, f"{model}{suffix}", dataset, with_embeddings=False)
+        except FileNotFoundError:
+            print(f"[seedvar] bank {model}{suffix}/{dataset} not present; skipping")
+            continue
+        per_seed[suffix or "-g0"] = {
+            pool.qid: {
+                "pass_at_1": pool.pass_at_1,
+                "entropy": answer_entropy(list(pool.answer_counts().values()))["entropy"],
+                "tail": tail_heaviness(pool),
+            }
+            for pool in pools
+        }
+    if len(per_seed) < 2:
+        print("[seedvar] fewer than two seed banks available; nothing to compare")
+        return
+    shared = sorted(set.intersection(*(set(v) for v in per_seed.values())))
+    labels = sorted(per_seed)
+    pass1 = np.asarray([[per_seed[s][q]["pass_at_1"] for s in labels] for q in shared])
+    entropy = np.asarray([[per_seed[s][q]["entropy"] for s in labels] for q in shared])
+    tails = [[per_seed[s][q]["tail"] for s in labels] for q in shared]
+    agreement = float(np.mean([len(set(row)) == 1 for row in tails]))
+    payload = {
+        "model": model,
+        "dataset": dataset,
+        "seed_banks": labels,
+        "n_shared_questions": len(shared),
+        "pass_at_1_sd_across_seeds_mean": float(pass1.std(axis=1).mean()),
+        "pass_at_1_sd_across_seeds_max": float(pass1.std(axis=1).max()),
+        "entropy_sd_across_seeds_mean": float(entropy.std(axis=1).mean()),
+        "tail_label_agreement": agreement,
+        "per_question": [
+            {
+                "qid": q,
+                "pass_at_1": dict(zip(labels, pass1[i].tolist())),
+                "tails": dict(zip(labels, tails[i])),
+            }
+            for i, q in enumerate(shared)
+        ],
+    }
+    _write(TABLES / "seed_variance.json", payload)
+    print(
+        f"[seedvar] {len(shared)} questions x {len(labels)} seeds: "
+        f"pass@1 sd mean={payload['pass_at_1_sd_across_seeds_mean']:.4f}, "
+        f"tail agreement={agreement:.2f}"
+    )
+
+
 def stage_encoder_stability(
     model: str,
     dataset: str,
@@ -763,6 +910,7 @@ def stage_assemble() -> None:
     TABLES.mkdir(parents=True, exist_ok=True)
     assemble_measurement()
     assemble_winner_map()
+    assemble_winnable()
     assemble_signals()
 
 
@@ -776,7 +924,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "stage",
-        choices=["pull", "cell", "cells", "synthetic", "assemble", "encoders", "all"],
+        choices=["pull", "cell", "cells", "synthetic", "assemble", "encoders", "seedvar", "all"],
     )
     parser.add_argument("--model")
     parser.add_argument("--dataset")
@@ -798,6 +946,8 @@ def main() -> int:
         stage_synthetic()
     elif arguments.stage == "assemble":
         stage_assemble()
+    elif arguments.stage == "seedvar":
+        stage_seed_variance()
     elif arguments.stage == "encoders":
         if not arguments.model or not arguments.dataset:
             raise SystemExit("encoders stage needs --model and --dataset")

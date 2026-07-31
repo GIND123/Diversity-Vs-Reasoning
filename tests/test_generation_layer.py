@@ -221,6 +221,38 @@ class TestShardingAndManifest:
         assert manifest["settings"]["prompt_template_version"] == PROMPT_TEMPLATE_VERSION
 
 
+class TestQuestionBankMerge:
+    """The published question file is shared by every bank of a dataset.
+
+    A run with a smaller --questions limit (a seed-variance spot check) must
+    never shrink it: doing so orphans the questions of larger banks and breaks
+    their analysis. This happened once — a 24-question run replaced the
+    96-question file on the Hub.
+    """
+
+    def merge(self, existing, incoming):
+        published = {row["qid"]: row for row in existing}
+        published.update({row["qid"]: row for row in incoming})
+        return [published[qid] for qid in sorted(published)]
+
+    def test_smaller_run_does_not_shrink_the_bank(self) -> None:
+        existing = [{"qid": f"gsm8k-test-{i:05d}", "question": "q"} for i in range(96)]
+        incoming = existing[:24]
+        assert len(self.merge(existing, incoming)) == 96
+
+    def test_larger_run_extends_the_bank(self) -> None:
+        existing = [{"qid": f"gsm8k-test-{i:05d}", "question": "q"} for i in range(96)]
+        incoming = [{"qid": f"gsm8k-test-{i:05d}", "question": "q"} for i in range(192)]
+        assert len(self.merge(existing, incoming)) == 192
+
+    def test_merge_is_sorted_and_incoming_wins(self) -> None:
+        existing = [{"qid": "b", "question": "old"}, {"qid": "a", "question": "old"}]
+        incoming = [{"qid": "a", "question": "new"}]
+        merged = self.merge(existing, incoming)
+        assert [row["qid"] for row in merged] == ["a", "b"]
+        assert merged[0]["question"] == "new"
+
+
 class TestHubLayout:
     def test_remote_paths_are_stable(self) -> None:
         assert (

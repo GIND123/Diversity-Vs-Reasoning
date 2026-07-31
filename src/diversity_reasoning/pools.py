@@ -319,6 +319,19 @@ class Pool:
         self._kernel_cache[key] = kernel
         return kernel
 
+    def release_caches(self) -> None:
+        """Drop cached kernels and adjusted embeddings for this pool.
+
+        Caches make a single pool's sweep fast, but they are per-pool and each
+        1024-chain pool holds ~75 MB of kernels once every variant is built.
+        Retaining them across a 192-question cell needs ~16 GB and the machine
+        starts swapping — one cell took 30x longer than the 96-question run for
+        twice the work. Stages that walk pools once release each pool as they
+        finish with it.
+        """
+        self._kernel_cache.clear()
+        self._embedding_cache.clear()
+
     def subsample(self, budget: int, seed: int) -> List[int]:
         """Seeded budget subsample of parsed-chain indices (sorted)."""
         return subsample_indices(self.size, budget, seed)

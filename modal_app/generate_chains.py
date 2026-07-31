@@ -167,17 +167,34 @@ def prepare_questions(
     bank = load_questions(key, limit=questions, seed=seed, token=token)
     rows = [item.to_dict() for item in bank]
 
+    # Merge, never replace. The published question file is shared by every bank,
+    # so a run with a smaller --questions limit (a seed-variance spot check, say)
+    # must not shrink it and orphan the questions of larger banks. Union by qid.
+    published: Dict[str, Dict[str, Any]] = {}
     destination = Path(BANK_ROOT) / "questions" / f"{key}.jsonl"
+    if destination.exists():
+        for line in destination.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                existing = json.loads(line)
+                published[str(existing["qid"])] = existing
+    dropped = len(published)
+    for row in rows:
+        published[str(row["qid"])] = row
+    merged = [published[qid] for qid in sorted(published)]
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8"
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in merged), encoding="utf-8"
     )
     bank_volume.commit()
 
     if push:
         ensure_repo(repo_id, token=token)
-        push_questions(rows, key, repo_id=repo_id, token=token)
-    print(f"[questions] {key}: {len(rows)} questions prepared")
+        push_questions(merged, key, repo_id=repo_id, token=token)
+    print(
+        f"[questions] {key}: {len(rows)} requested, {len(merged)} published "
+        f"(was {dropped}; merged, never truncated)"
+    )
     return rows
 
 
@@ -232,6 +249,7 @@ def _generate_shard(
     model_id: str,
     dataset: str,
     shard_index: int,
+    bank_suffix: str = "",
     questions: Sequence[Dict[str, Any]],
     settings_payload: Dict[str, Any],
     repo_id: str,
@@ -254,7 +272,7 @@ def _generate_shard(
     from diversity_reasoning.schemas import ChainRecord
 
     key = dataset_key(dataset)
-    short = model_short_name(model_id)
+    short = model_short_name(model_id) + bank_suffix
     settings = GenerationSettings(**settings_payload)
     local_path = Path(BANK_ROOT) / shard_remote_path(short, key, shard_index)
 
@@ -484,6 +502,7 @@ def finalize_bank(
     question_count: int,
     repo_id: str = DEFAULT_REPO,
     push: bool = True,
+    bank_suffix: str = "",
 ) -> Dict[str, Any]:
     """Write and publish the bank manifest once every shard has landed."""
     import os
@@ -493,7 +512,7 @@ def finalize_bank(
     from diversity_reasoning.prompts import dataset_key
 
     key = dataset_key(dataset)
-    short = model_short_name(model_id)
+    short = model_short_name(model_id) + bank_suffix
     generated = [row for row in summaries if row.get("status") == "generated"]
     chains = sum(int(row.get("chains", 0)) for row in generated)
     weighted = sum(
@@ -550,7 +569,11 @@ def main(
     questions: int = 128,
     chains: int = 1024,
     micro_batch: int = 128,
+    # `seed` is the generation seed g; `question_seed` picks the question
+    # subsample. The B1 variance spot check varies g on a fixed question set,
+    # so the two must be independent.
     seed: int = 0,
+    question_seed: int = 0,
     shard_questions: int = 16,
     # Blueprint default is 400. MATH needs more: at 400 tokens 98% of unparsed
     # chains were truncations, leaving only short solutions in the pool.
@@ -562,6 +585,9 @@ def main(
     force: bool = False,
     embed: bool = True,
     encoder: str = DEFAULT_ENCODER,
+    # Distinguishes variance-check banks (e.g. "-g1") from the main bank in
+    # every storage path; the main bank uses the empty suffix.
+    bank_suffix: str = "",
 ) -> None:
     """Generate one (model, dataset) chain bank, publish it, then embed it."""
     settings_payload = {
@@ -571,7 +597,7 @@ def main(
         "max_new_tokens": max_new_tokens,
     }
 
-    question_rows = prepare_questions.remote(dataset, questions, seed, repo, push)
+    question_rows = prepare_questions.remote(dataset, questions, question_seed, repo, push)
     by_qid = {row["qid"]: row for row in question_rows}
     ordered = sorted(by_qid)
     plan = [
@@ -593,6 +619,7 @@ def main(
             "repo_id": repo,
             "push": push,
             "force": force,
+            "bank_suffix": bank_suffix,
         }
         for shard_index, qids in plan
     ]
@@ -602,9 +629,13 @@ def main(
     )
 
     summaries = list(worker.generate_shard.map(tasks))
-    finalize_bank.remote(model, dataset, settings_payload, summaries, len(ordered), repo, push)
+    finalize_bank.remote(
+        model, dataset, settings_payload, summaries, len(ordered), repo, push, bank_suffix
+    )
     if embed:
-        embed_bank.remote(model_short_name(model), dataset, encoder, 256, repo, push, force)
+        embed_bank.remote(
+            model_short_name(model) + bank_suffix, dataset, encoder, 256, repo, push, force
+        )
 
 
 @app.local_entrypoint()

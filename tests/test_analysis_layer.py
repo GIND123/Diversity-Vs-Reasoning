@@ -236,6 +236,23 @@ class TestAnisotropy:
             pool.kernel("embedding", components=1)
 
 
+class TestCacheRelease:
+    """Per-pool caches must be droppable; retaining them across a large cell
+    exceeded RAM and made a 192-question run 30x slower than a 96-question one."""
+
+    def test_release_clears_kernel_and_embedding_caches(self) -> None:
+        rng = np.random.default_rng(9)
+        pool = make_pool([str(i % 3) for i in range(12)], embeddings=rng.normal(size=(12, 6)))
+        first = pool.kernel("embedding_qc", components=1)
+        pool.question_centered_embeddings(1)
+        assert pool._kernel_cache and pool._embedding_cache
+        pool.release_caches()
+        assert not pool._kernel_cache and not pool._embedding_cache
+        rebuilt = pool.kernel("embedding_qc", components=1)
+        assert rebuilt is not first
+        assert np.allclose(rebuilt, first), "released caches must rebuild identically"
+
+
 class TestDuplicationRegimes:
     """T7 has two halves; E2 must report both rather than blur them."""
 

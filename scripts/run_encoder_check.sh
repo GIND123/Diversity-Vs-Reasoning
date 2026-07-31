@@ -18,4 +18,5 @@ echo "[encoders] $(date -u +%FT%TZ) start $MODEL/$DATASET with $ENCODER"
 $MODAL run modal_app/generate_chains.py::embed_only \
   --model "$MODEL" --dataset "$DATASET" --encoder "$ENCODER" \
   > "$LOG_DIR/encoder_stability.log" 2>&1
-echo "[encoders] $(date -u +%FT%TZ) done exit=$?"
+exit_code=$?
+echo "[encoders] $(date -u +%FT%TZ) done exit=$exit_code"

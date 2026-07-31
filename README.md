@@ -22,7 +22,7 @@ family.
 | **Coverage** | pseudo log-determinant (sum of logs of nonzero eigenvalues); raw-spectrum form for selection, T4-pinned normalized form for measurement; τ sensitivity at {1e-8, 1e-10, 1e-12} |
 | **Reference selectors** | facility location (representativeness); random (20 seeds, the baseline in every comparison) |
 | **Models** | Qwen2.5-0.5B-Instruct · Qwen2.5-1.5B-Instruct · Llama-3.2-3B-Instruct (pass@1 spanning 0.30 → 0.71) |
-| **Datasets** | GSM8K test (96 questions) · MATH levels 1–5 (60 questions, 12 per level, level-stratified) |
+| **Datasets** | GSM8K test (96/192 questions) · MATH levels 1–5 (60 questions, 12 per level, level-stratified) |
 | **Chain banks** | 1024 chains per question; temperature 1.0, top-p 0.95; 400 new tokens (GSM8K) / 1024 (MATH, truncation-audited); vLLM on A100 |
 | **Kernels** | K_emb (question-centred primary; raw and corpus-anisotropy arms as ablations) · K_ans (sympy answer-equivalence classes) · K_α = αK_ans + (1−α)K_emb, α ∈ {0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0} |
 | **Selection** | greedy per objective (batched, provably identical to naive greedy); budgets k ∈ {2, 3, 4, 8, 16, 32}; pools of 40 and 1024; every arm averaged over 5 subsample draws |
@@ -30,7 +30,8 @@ family.
 | **Hardness strata** | Snell bins on pass@1 (terciles headline, quintiles appendix) · MATH level 1–5 · answer entropy |
 | **Tail-heaviness strata** | rank of the correct answer in the 1024-chain distribution: modal (1) · minority (2–5) · tail (>5) · absent |
 | **Subsample budgets** | n ∈ {4, 8, 16, 32, 64, 128, 256, 512, 1024} per question, seeded |
-| **Encoder** | bge-large-en-v1.5 (mxbai-embed-large-v1 rank-stability check) |
+| **Encoders** | bge-large-en-v1.5 primary; mxbai-embed-large-v1 rank-stability check (TB-7) |
+| **Generation seeds** | g = 0 for all banks; g ∈ {1, 2} regenerated on a fixed subset to bound seed variance (TB-8) |
 | **Statistics** | paired question-level bootstrap (1000 replicates) vs. random · Holm within families · cross-model replication as the evidence standard · practical-null at \|δ\| < 0.01 |
 
 ## Selected findings
@@ -66,10 +67,19 @@ VS_1 ≈ 9 and lets selectors separate. Replicates across all three models.
 Similarity-Eigenvalue-Prevalence theorem): at budgets at or below the number of
 distinct answers, every order q selects the same chains.
 
-**Headroom governs everything.** VS_∞ improves pass@k where the model is weak
-(+0.031 and +0.020 with CIs excluding zero on the two weaker models) and the
-effect vanishes as random selection approaches ceiling (95% at k = 8 on the
-strongest model). Selection objectives matter exactly where models leave room.
+<p align="center">
+  <img src="assets/P-2g.png" width="88%" alt="Winnable share predicts the achievable gain better than headroom">
+</p>
+
+**What bounds the gain is the winnable share, not headroom.** A selector cannot
+lose a question whose correct answer is already the mode, and cannot win one
+where that answer never appears; only the present-but-not-modal questions are
+contestable. Across cells that share tracks the best achievable gain more
+closely than raw headroom does (pass@k: r = +0.61 vs +0.48), because headroom
+counts absent questions a selector has no way to win. Diversity selection helps
+where models are weak enough to leave contestable questions — VS_2 and VS_∞
+beat random on pass@k on the two weaker models — and fades to nothing on the
+strongest, where random selection already succeeds 95% of the time at k = 8.
 
 Full numbers, hypothesis strip, and limitations: [RESULTS.md](RESULTS.md).
 Alignment with the defining papers, equation-by-equation: [LITERATURE.md](LITERATURE.md).

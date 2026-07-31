@@ -20,7 +20,9 @@ cell() {
   ${=RUN} --model "$model" --dataset "$dataset" --questions "$questions" \
     --chains 1024 --micro-batch 128 --shard-questions 16 "$@" \
     > "$LOG_DIR/$name.log" 2>&1
-  echo "[campaign] $(date -u +%FT%TZ) done $name exit=$?"
+  exit_code=$?  # capture first: $(date) below would reset $?, and
+                # `status` is read-only in zsh
+  echo "[campaign] $(date -u +%FT%TZ) done $name exit=$exit_code"
 }
 
 # GSM8K first: cheaper per question, unblocks the analysis pipeline earliest.

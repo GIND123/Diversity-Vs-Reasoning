@@ -23,7 +23,8 @@ cell() {
     --chains 1024 --micro-batch 128 --shard-questions 16 \
     --max-new-tokens "$MAX_NEW_TOKENS" --force \
     > "$LOG_DIR/$name.log" 2>&1
-  echo "[math] $(date -u +%FT%TZ) done $name exit=$?"
+  exit_code=$?
+  echo "[math] $(date -u +%FT%TZ) done $name exit=$exit_code"
 }
 
 cell Qwen/Qwen2.5-0.5B-Instruct 60
