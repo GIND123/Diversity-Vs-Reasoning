@@ -1,112 +1,187 @@
-# Diversity vs. Coverage: Which Is Best for LLM Reasoning?
+# Diversity vs. Coverage as Measures of Variability, and Their Impact on LLM Reasoning
 
-**The question.** A model answers one question 1024 times. You can afford to use
-8 of those chains. Do you pick the 8 that maximise **diversity** — the Vendi
-Score family `VS_q`, the exponential of the **Rényi** entropy of order *q* of a
-normalized similarity-kernel spectrum ([Friedman & Dieng 2023][vs],
-[Pasarkar & Dieng 2024][cousins]) — or the 8 that maximise **coverage**, the
-pseudo log-determinant, the sum of the logs of the nonzero eigenvalues of the
-same kernel ([Kulesza & Taskar 2012][dpp])? Which wins, for which aspect of
-reasoning, and under what conditions?
+Diversity and coverage are two ways to quantify how much variability a set of
+items contains. **Diversity** is the Vendi Score family `VS_q` — the exponential
+of the **Rényi** entropy of order *q* of the spectrum of a normalized similarity
+kernel ([Friedman & Dieng 2023][vs], [Pasarkar & Dieng 2024][cousins]).
+**Coverage** is the **pseudo log-determinant**: the sum of the logs of the
+*nonzero* eigenvalues of the same kernel, the DPP log-volume
+([Kulesza & Taskar 2012][dpp]).
 
-Every order *q*, including the *q* → 0 richness limit, is a **diversity**
-measure. Coverage is a separate functional, never a member of the family.
+**Every order q is a diversity measure**, including the q → 0 richness limit.
+Coverage is a separate functional and is never a member of the family.
+
+This study asks how the two differ as measures of variability (**RQ1**), and how
+those differences then affect LLM reasoning (**RQ2**, built on RQ1).
+
+---
+
+# RQ1 — How do diversity and coverage differ as measures of variability?
+
+## (a) Are they limiting cases of one order-q family?
+
+**No, and the data says so directly.** If coverage were the low-q limit of the
+diversity family, VS₀ (richness) would be the order most like it. Measured at a
+fixed budget across all six cells, the opposite holds:
+
+| | correlation with coverage |
+|---|---|
+| **VS₀** (the low-q limit) | **−0.17 to +0.29 — essentially none** |
+| VS₁ | **+0.88 to +0.96** |
+
+The low-q limit is the member of the family *least* like coverage. They are
+distinct functionals: `VS_q` is an effective **number** bounded in [1, n];
+coverage is a log **volume**, unbounded below, that diverges as any eigenvalue
+approaches zero.
+
+## (b) How do their sensitivities differ?
+
+<p align="center">
+  <img src="assets/P-1a.png" width="92%" alt="Rare-mode sensitivity">
+</p>
+
+**Rare modes.** As a mode's prevalence vanishes, low-q diversity holds near the
+mode count while high-q ignores the rare mode entirely; coverage diverges as the
+corresponding eigenvalue enters the null space.
+
+**Redundancy.** The two duplication regimes must be separated. Under **uniform**
+duplication the normalized spectrum is untouched, so *every* functional is
+exactly flat. Under **skewed** duplication (a random subset copied) VS_q falls
+**and coverage moves too** — coverage is invariant only to uniform duplication,
+not to duplication in general.
+
+**Sample size.** Rank stability against subsample size differs by order; the
+smallest n reaching Kendall τ ≥ 0.9 is reported per functional (TB-1).
+
+**Dimensionality.** Over PCA dimensions d = 8 → 1024 on the same pools:
+
+| | d = 8 | d = 1024 | scaling |
+|---|---|---|---|
+| VS₁ | 4.8 | 13.0 | ~3× |
+| coverage | −25.7 | −12,280 | **~500×** |
+
+Coverage is dramatically more dimensionality-sensitive, and the reason is
+structural: the pseudo log-determinant sums `log λ` over *every* nonzero
+eigenvalue, so its magnitude grows with the rank of the kernel, while `VS_q` is
+an effective number bounded by the item count. Comparing coverage values across
+different embedding dimensions is therefore not meaningful without
+renormalization; comparing VS_q values is.
+
+## (c) How are the two log functionals related, and when do they diverge?
+
+<p align="center">
+  <img src="assets/P-1e.png" width="85%" alt="Simpson-style reversal between the two log functionals">
+</p>
+
+Within a fixed budget, log VS_q and coverage correlate **strongly positively**
+(r up to +0.998) — locally both read the same bulk spectrum. Pooled across
+budgets the correlation **flips negative**: a Simpson-style reversal with budget
+as the confounder, because coverage is dominated by the smallest eigenvalues.
+
+Two refinements this study adds:
+
+- The reversal is **specific to continuous kernels**. On the answer kernel the
+  two are anti-correlated at *every* scope.
+- The `ε = 1` variant (`Σ log(1 + λ)`) is **positive everywhere**, hiding the
+  divergence completely. It is not an approximation to the pseudo log-determinant.
+
+## The measurement precondition: the kernel must be fixed first
+
+<p align="center">
+  <img src="assets/P-A4.png" width="92%" alt="Embedding-kernel concentration is question-specific">
+</p>
+
+Both functionals are functionals *of a similarity kernel*. On pools of chains
+that all answer **the same question**, the raw sentence-embedding kernel is
+nearly rank-1: the leading eigenvalue holds **94%** of the spectral mass and
+`VS₁ ≈ 1.4` among 40 genuinely different chains — the "all items identical"
+floor of the effective-number axiom. Different objectives then pick the *same*
+chains 22% of the time.
+
+The standard anisotropy correction (removing corpus-wide directions) **barely
+helps** — VS₁ reaches only 2.15. The concentration is **question-specific**: no
+small set of corpus directions can remove 96 different question topics.
+Re-expressing chains as deviations from **their own question's centroid**
+restores VS₁ ≈ 9.3 and drops identical selection to 0.06. Replicated on 3
+models, 2 model families, 2 datasets.
+
+This is consistent with the earlier observation that text embeddings are nearly
+blind to final answers: the same-vs-different answer cosine gap is only ≈ +0.02
+even after correction.
+
+<p align="center">
+  <img src="assets/P-0c.png" width="85%" alt="Effective-number axiom on synthetic pools">
+</p>
+<p align="center"><em>The axiom the raw kernel violated: N balanced dissimilar classes score exactly N for every order q (left); the orders separate under imbalance (right).</em></p>
+
+---
+
+# RQ2 — How do those differences affect LLM reasoning?
 
 <p align="center">
   <img src="assets/P-2a.png" width="92%" alt="Accuracy vs selection budget for each objective against the random band">
 </p>
-<p align="center"><em><b>The comparison.</b> Accuracy against selection budget for greedy VS<sub>1</sub>, greedy VS<sub>∞</sub>, greedy coverage, and facility location, against the 20-seed random band, under all three aggregation rules.</em></p>
 
-## The short answer
+## (a) and (b) When does diversity help, when does coverage, and under which rule?
 
-| regime | what wins | effect |
+| regime | winner | effect |
 |---|---|---|
-| pass@k, weak models | **diversity** (VS<sub>2</sub>, VS<sub>∞</sub>) | +0.033 (Holm *p* = 0.028), +0.020 |
+| pass@k, weak models | **diversity** (VS₂, VS_∞) | +0.033 (Holm *p* = 0.028); +0.020 |
 | pass@k, **tail-heavy** questions | **coverage** | +0.068, CI [+0.014, +0.121] |
 | majority vote, MATH on a weak model | **coverage** | +0.034 |
 | majority vote, modal questions | facility location | +0.060 |
 | anything on the strongest model | **nothing beats random** | all CIs contain zero |
 
 Diversity orders tend to win **pass@k** — you want to *hit* the answer, so
-spread out. Coverage does better on **tail-heavy** questions, where the correct
-answer is rare and reaching it needs volume. Effects are small (2–7 points), and
-the reason is measurable: see the bound below.
-
-<p align="center">
-  <img src="assets/P-2g.png" width="88%" alt="Winnable share bounds the achievable gain better than headroom">
-</p>
-
-**What bounds the gain.** A selector cannot lose a question whose correct answer
-is already modal, and cannot win one where that answer never appears. Only
-*present-but-not-modal* questions are contestable, and that **winnable share**
-tracks the achievable gain (r = +0.61) better than raw headroom does (r = +0.48),
-which overcounts by including questions no selector can win.
-
-## You cannot answer the question without fixing the kernel first
-
-<p align="center">
-  <img src="assets/P-A4.png" width="92%" alt="Embedding-kernel concentration is question-specific">
-</p>
-
-`VS_q` is a functional *of a similarity kernel*. On pools of chains that all
-answer **the same question**, the raw sentence-embedding kernel is nearly
-rank-1: the leading eigenvalue holds **94%** of the spectral mass and
-`VS_1 ≈ 1.4` among 40 genuinely different chains — the "all items identical"
-floor of the effective-number axiom. Different objectives then select the *same*
-chains 22% of the time, and the comparison measures nothing.
-
-The standard anisotropy fix (removing directions shared across the corpus)
-**barely helps** — VS<sub>1</sub> only reaches 2.15. The concentration is
-*question-specific*: with 96 different questions, no small set of corpus
-directions removes 96 topics. Re-expressing chains as deviations from **their
-own question's centroid** restores VS<sub>1</sub> ≈ 9.3 and drops the
-identical-selection rate to 0.06. Replicated on 3 models, 2 families, 2 datasets.
-
-<p align="center">
-  <img src="assets/P-0c.png" width="85%" alt="Effective-number axiom on synthetic pools with known ground truth">
-</p>
-<p align="center"><em>The axiom the raw kernel violated: N balanced dissimilar classes must score exactly N for every order q (left), and the orders must separate under imbalance (right).</em></p>
-
-## The two functionals disagree depending on scope
-
-<p align="center">
-  <img src="assets/P-1e.png" width="85%" alt="Simpson-style reversal between the two log functionals">
-</p>
-
-Within a fixed budget, log VS<sub>q</sub> and coverage correlate strongly
-**positively** (r up to +0.998). Pooled across budgets the correlation flips
-**negative** — a Simpson-style reversal driven by budget as a confounder. Two
-refinements: the reversal is specific to **continuous** kernels (on the answer
-kernel the two are anti-correlated at every scope), and the `ε = 1` log-det
-variant is positive everywhere, so it destroys the effect rather than
-approximating it.
+spreading out pays. Coverage does better where the correct answer is **rare**,
+which is where reaching it requires volume rather than representativeness.
 
 <p align="center">
   <img src="assets/P-2f.png" width="80%" alt="q-inertness on the answer kernel">
 </p>
 
-**On the answer kernel, q is inert by construction.** At budgets at or below the
-number of distinct answers, every order selects identically — the
-Similarity–Eigenvalue–Prevalence theorem ([Cousins][cousins], Thm 4.1) made
-visible.
+**On the answer kernel the order q is inert.** At budgets at or below the number
+of distinct answers, every order selects identically — Theorem 4.1 of
+[Cousins][cousins] made visible. The graded family remains the right measurement
+lens for RQ1, but on answer-space selection its reasoning effect collapses to
+the choice of aggregation rule.
+
+## (c) How does it depend on tail-heaviness?
+
+<p align="center">
+  <img src="assets/P-2g.png" width="88%" alt="Winnable share bounds the achievable gain">
+</p>
+
+Tail-heaviness is what governs the whole picture. A selector cannot lose a
+question whose correct answer is already **modal**, and cannot win one where the
+answer is **absent**. Only *present-but-not-modal* questions are contestable,
+and that **winnable share** predicts the achievable gain (r = +0.61) better than
+raw headroom (r = +0.48), which overcounts by including unwinnable questions.
+
+That is why effects are small (2–7 points) and vanish on the strongest model:
+by then almost every question is already modal.
+
+---
 
 ## Study design
 
 | Axis | Values |
 |---|---|
-| **Diversity** | VS<sub>q</sub>, **q ∈ {0, 0.1, 0.5, 1.0, 2.0, ∞}**, via the pinned [vertaix/Vendi-Score][repo] |
-| **Coverage** | pseudo log-determinant; τ sensitivity at {1e-8, 1e-10, 1e-12}; ε = 1 arm kept as the artifact control |
+| **Diversity** | VS<sub>q</sub>, **q ∈ {0, 0.1, 0.5, 1.0, 2.0, ∞}**, via the pinned [vertaix/Vendi-Score][repo] `score_K` |
+| **Coverage** | pseudo log-determinant = sum of logs of the **nonzero** eigenvalues; τ ∈ {1e-8, 1e-10, 1e-12}; ε = 1 arm kept as the artifact control |
 | **References** | facility location (representativeness); random ×20 seeds, the baseline in every comparison |
 | **Models** | Qwen2.5-0.5B · Qwen2.5-1.5B · Llama-3.2-3B (pass@1 0.27 → 0.71) |
-| **Datasets** | GSM8K test ([Cobbe et al. 2021][gsm8k]) · MATH levels 1–5 ([Hendrycks et al. 2021][math]) |
+| **Datasets** | GSM8K ([Cobbe et al. 2021][gsm8k]) · MATH levels 1–5 ([Hendrycks et al. 2021][math]) |
 | **Questions** | 192 / 96 / 96 (GSM8K); 180 / 120 / 60 (MATH, level-stratified) |
-| **Chains** | 1024 per question; T = 1.0, top-p 0.95; ~900k chains total |
-| **Kernels** | K<sub>emb</sub> (question-centred primary; raw and corpus-anisotropy arms as ablations) · K<sub>ans</sub> · K<sub>α</sub>, α ∈ {0 … 1} |
+| **Chains** | 1024 per question; T = 1.0, top-p 0.95; ~900k chains |
+| **Variability spaces** | K<sub>emb</sub> (question-centred primary; raw + corpus-anisotropy arms) · K<sub>ans</sub> · K<sub>α</sub> interpolating between them, α ∈ {0 … 1} |
 | **Selection** | greedy per objective (batched, provably identical to naive greedy); k ∈ {2,3,4,8,16,32}; pools of 40 and 1024; every arm averaged over 5 subsample draws |
 | **Aggregation** | majority vote ([Wang et al. 2023][sc]) · pass@k ([Chen et al. 2021][passk]) · verifier best-of-n |
-| **Strata** | Snell bins on pass@1 ([Snell et al. 2024][snell]) · MATH level · answer entropy · tail-heaviness (modal / minority / tail / absent) |
+| **Hardness** | Snell pass@1 quantile bins ([Snell et al. 2024][snell]) · MATH levels 1–5 · answer entropy |
+| **Tail-heaviness** | modal · minority (2–5) · tail (>5) · absent |
+| **Dimensionality** | PCA d ∈ {8 … 1024} (RQ1(b)) |
 | **Encoders** | bge-large primary; mxbai, E5, GTE, MPNet for kernel robustness |
-| **Statistics** | paired question-level bootstrap ×1000 · Holm within families · **replication across models as the evidence standard** · practical null at \|δ\| < 0.01 |
+| **Statistics** | paired bootstrap ×1000 · Holm within families · **replication across models as the evidence standard** · practical null at \|δ\| < 0.01 |
 
 ## Robustness
 
@@ -114,15 +189,14 @@ visible.
 |---|---|
 | generation-seed variance (g ∈ {0,1,2}, full regeneration) | pass@1 sd **0.0096** vs effects of 0.02–0.07 |
 | cross-encoder rank stability | τ ≈ 0.83–0.90 for coverage and every q ≥ 0.1 |
-| Eq. 7 monotonicity, Eq. 8 bound | **0 violations in 1,728 real spectra** |
+| Eq. 7 monotonicity and Eq. 8 bound | **0 violations in 1,728 real spectra** |
 | effective-number axiom | exact for every q on synthetic pools |
-| kernel validity (symmetry, PSD, unit diagonal) | enforced for every kernel variant |
+| kernel validity (symmetric, PSD, unit diagonal) | enforced for every kernel variant |
 | implementation vs published equations | 36 tests transcribing Eq. 1, 6, 7, 8 and Thm 4.1 |
 
-**VS<sub>0</sub> is excluded from winner claims on continuous kernels.** Three
-independent lines agree: [Cousins][cousins] calls q = 0 "an uninformative
-measure of diversity"; greedy VS<sub>0</sub> picked the eight lowest-indexed
-chains on 20 of 20 pools (index selection, not content selection); and its
+**VS₀ is excluded from winner claims on continuous kernels.** [Cousins][cousins]
+calls q = 0 "an uninformative measure of diversity"; greedy VS₀ picked the eight
+lowest-indexed chains on 20 of 20 pools (index, not content, selection); and its
 cross-encoder rank stability is τ = 0.34 against ≈0.88 for every other order.
 
 ## Documentation
@@ -131,9 +205,9 @@ cross-encoder rank stability is τ = 0.34 against ≈0.88 for every other order.
 |---|---|
 | **[assets/learn.md](assets/learn.md)** | **full walkthrough** — the measures from Hill numbers up, every design decision, every result, every error found, and how to defend each claim |
 | [RESULTS.md](RESULTS.md) | all numbers, hypothesis strip, limitations |
-| [FIGURES.md](FIGURES.md) | all 26 figures and 9 tables, with the colour semantics |
+| [FIGURES.md](FIGURES.md) | all figures and tables, with colour semantics |
 | [LITERATURE.md](LITERATURE.md) | equation-by-equation alignment with the defining papers |
-| [TRIAGE.md](TRIAGE.md) | every deviation from the blueprint and its justification |
+| [TRIAGE.md](TRIAGE.md) | every deviation from the plan and its justification |
 | [ENVIRONMENT.md](ENVIRONMENT.md) | pinned versions and reproduction environment |
 
 ## Data
@@ -157,17 +231,17 @@ No number enters a figure, table, or results file by hand.
 
 ## References
 
-- Friedman & Dieng (2023). *The Vendi Score: A Diversity Evaluation Metric for Machine Learning.* TMLR. [arXiv:2210.02410][vs]
+- Friedman & Dieng (2023). *The Vendi Score.* TMLR. [arXiv:2210.02410][vs]
 - Pasarkar & Dieng (2024). *Cousins of the Vendi Score.* AISTATS. [arXiv:2310.12952][cousins]
 - Rezaei & Dieng (2025). *Vendi-RAG.* [arXiv:2502.11228](https://arxiv.org/abs/2502.11228)
-- Bilmes, Bhatt & Das (2026). *How Much Is a Dataset Worth?* [arXiv:2605.29448](https://arxiv.org/abs/2605.29448)
+- Bilmes, Bhatt & Das (2026). *How Much Is a Dataset Worth? Scaling Laws, the Vendi Score, and Matrix Spectral Functions.* [arXiv:2605.29448](https://arxiv.org/abs/2605.29448)
 - Deprez et al. (2026). *Diversity by Chance: Rethinking the Need for DPPs in Active Learning.* SciTePress.
 - Hill (1973). *Diversity and Evenness.* Ecology 54(2). · Leinster & Cobbold (2012). *Measuring diversity: the importance of species similarity.* Ecology 93(3).
 - Kulesza & Taskar (2012). *Determinantal Point Processes for Machine Learning.* [arXiv:1207.6083][dpp]
-- Naeem et al. (2020). *Reliable Fidelity and Diversity Metrics for Generative Models.* ICML. (the *other* "coverage")
+- Naeem et al. (2020). *Reliable Fidelity and Diversity Metrics for Generative Models.* ICML. (the *other* sense of "coverage")
 - Wang et al. (2023). *Self-Consistency Improves Chain of Thought Reasoning.* ICLR. [arXiv:2203.11171][sc]
 - Snell et al. (2024). *Scaling LLM Test-Time Compute Optimally.* [arXiv:2408.03314][snell]
-- Chen et al. (2021). *Evaluating LLMs Trained on Code.* [arXiv:2107.03374][passk] · Cobbe et al. (2021). *Training Verifiers to Solve Math Word Problems.* [arXiv:2110.14168][gsm8k] · Hendrycks et al. (2021). *Measuring Mathematical Problem Solving.* [arXiv:2103.03874][math]
+- Chen et al. (2021). *Evaluating LLMs Trained on Code.* [arXiv:2107.03374][passk] · Cobbe et al. (2021). [arXiv:2110.14168][gsm8k] · Hendrycks et al. (2021). [arXiv:2103.03874][math]
 
 [vs]: https://arxiv.org/abs/2210.02410
 [cousins]: https://arxiv.org/abs/2310.12952

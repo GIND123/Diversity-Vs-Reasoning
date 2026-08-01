@@ -8,11 +8,11 @@ from there to every decision, result, and pitfall in this project.
 
 1. [The measures, precisely](#1-the-measures-precisely)
 2. [Why coverage is *not* part of the family](#2-why-coverage-is-not-part-of-the-family)
-3. [The research question](#3-the-research-question)
+3. [The research questions](#3-the-research-questions)
 4. [How the data was made](#4-how-the-data-was-made)
 5. [The kernel problem — the study's central methodological finding](#5-the-kernel-problem)
 6. [The statistical protocol](#6-the-statistical-protocol)
-7. [Results: when does diversity help, when does coverage](#7-results)
+7. [Results](#7-results)
 8. [Every error we found, and what it teaches](#8-every-error-we-found)
 9. [How to defend each claim](#9-how-to-defend-each-claim)
 10. [References](#10-references)
@@ -144,11 +144,36 @@ her own literature.
 
 ---
 
-## 3. The research question
+## 3. The research questions
 
-> For each aspect of LLM reasoning, does selecting reasoning chains to maximise
-> **diversity** (VS_q) or **coverage** (pseudo log-det) work better, and under
-> what conditions?
+The project has two, and **RQ1 is the primary one** — RQ2 is built on it.
+
+> **RQ1 (measurement theory).** How do diversity and coverage differ as measures
+> of variability?
+> **(a)** Are they limiting cases of the same order-q family — coverage being
+> richness or low-q behaviour, diversity being q = 1?
+> **(b)** How do their sensitivities differ with respect to rare modes,
+> redundancy, sample size, and **dimensionality**?
+> **(c)** How are the two log-variability functionals related, and under what
+> conditions do they diverge?
+
+> **RQ2 (reasoning impact).** How do those differences affect LLM reasoning?
+> **(a)** When does maximising diversity beat maximising coverage, and when does
+> it hurt? **(b)** How do the effects differ across majority voting, pass@k, and
+> verifier-based selection? **(c)** How does the answer depend on the
+> tail-heaviness of the correct-answer distribution?
+
+**RQ1(a) has a definitive answer, and it is "no".** The premise in the original
+phrasing — that coverage is the low-q limit of the diversity family — is wrong,
+and Adji corrected it explicitly: *"low q limit is still diversity and not
+coverage."* Our data confirms it independently. If coverage were the low-q
+limit, VS_0 would be the order most like it. Measured at a fixed budget across
+all six cells, VS_0 correlates with coverage at **−0.17 to +0.29 (essentially
+zero)** while VS_1 correlates at **+0.88 to +0.96**. The low-q limit is the
+member of the family *least* like coverage.
+
+Concretely, the setup for RQ2: a model answers one question 1024 times. You can
+only afford to *use* k of them (say 8). Which 8?
 
 The setup: a model answers a maths question 1024 times, producing 1024 chains of
 reasoning. You can only afford to *use* k of them (say 8). Which 8?
@@ -309,6 +334,24 @@ Two refinements we added:
 - The `ε = 1` variant (`Σ log(1 + λ)`, sometimes used to avoid `log 0`) is
   **positive everywhere** — it destroys the effect and is not a substitute for
   the pseudo log-determinant.
+
+### 7.1b Dimensionality: coverage is far more sensitive than diversity
+
+Adji added dimensionality to RQ1(b) explicitly. Sweeping PCA dimension over the
+same pools:
+
+| | d = 8 | d = 1024 | scaling |
+|---|---|---|---|
+| VS_1 | 4.8 | 13.0 | ~3x |
+| coverage | −25.7 | −12,280 | **~500x** |
+
+The reason is structural. Coverage sums `log λ` over *every* nonzero eigenvalue,
+so its magnitude grows with the rank of the kernel and is unbounded below. VS_q
+is an effective number bounded by the item count. **Practical consequence:
+coverage values are not comparable across embedding dimensions without
+renormalisation; VS_q values are.** This also explains why coverage is the more
+threshold-fragile of the two (see the τ sensitivity appendix): both issues come
+from the same place, its dependence on the near-null part of the spectrum.
 
 ### 7.2 The winner map
 
