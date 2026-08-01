@@ -29,7 +29,7 @@ review). Tables are emitted as Markdown alongside the figures.
 |---|---|
 | **P-0a** | Snell hardness bin × MATH level occupancy, with Spearman ρ — confirms the two hardness definitions are correlated but not redundant |
 | **P-0b** | Answer-entropy distribution per model and dataset |
-| **P-0c** | **Effective-number axiom on synthetic pools with known ground truth.** Left: N balanced dissimilar classes score exactly N for every order q. Right: as one class takes over, the orders separate — low q holds near the class count, high q tracks the dominant mass. This is the property the raw embedding kernel violated on real pools |
+| **P-0c** | **Effective-number axiom on synthetic pools with known ground truth.** Left: N balanced dissimilar classes score exactly N for every order q. Right: as one class takes over, the orders separate — low q holds near the class count, high q tracks the dominant mass. These are the reference points against which the near-rank-1 behaviour of the raw embedding kernel on real same-question pools is read |
 
 ## Measurement: how the two functionals behave (D1)
 
@@ -52,7 +52,7 @@ review). Tables are emitted as Markdown alongside the figures.
 | **P-2d** | α threshold: accuracy against answer-awareness mixing, with α\* marked — the arm closest to the diversity-quality trade-off that Vendi-RAG shows works |
 | **P-2e** | Four-panel tail conditioning: every objective's delta within modal / minority / tail / absent |
 | **P-2f** | **q-inertness on the answer kernel.** At budgets at or below the number of distinct answers, every order q selects identically — the Similarity-Eigenvalue-Prevalence theorem made visible |
-| **P-2g** | **What bounds the achievable gain.** Best delta against the winnable share (correct answer present but not modal) versus against raw headroom. The winnable share tracks it more closely, because headroom counts absent questions no selector can win |
+| **P-2g** | **A retracted exploratory pattern.** Best delta against the winnable share (correct answer present but not modal) versus against raw headroom. An intermediate five-cell version showed the winnable share tracking the gain (r ≈ +0.75); at final scale the correlation collapsed to r = +0.06 on pass@k and is negative for the other rules. Retained only to document the retraction |
 
 ## Payoff: verifier-free signals (D3)
 
@@ -74,7 +74,7 @@ review). Tables are emitted as Markdown alongside the figures.
 | ID | What it shows |
 |---|---|
 | **P-A3** | τ threshold sensitivity for coverage: mean, median, and worst change, plus rank stability, at τ ∈ {1e-8, 1e-12} against the 1e-10 default |
-| **P-A4** | **Why the embedding kernel is question-centred.** Spectral concentration, effective modes, and rate of identical selections across the raw, corpus-corrected, and question-centred kernels |
+| **P-A4** | **Why an experimental question-centred embedding kernel is used.** Spectral concentration, effective modes, and rate of identical selections across the raw, corpus-corrected, and question-centred kernels |
 | **P-A4b** | Effect sizes under each kernel-correction arm |
 | **P-A5** | **The kernel diagnosis across five encoder families** (BGE, MXBAI, E5, GTE, MPNet) — raw top-eigenvalue share 0.922–0.975 everywhere, collapsing to 0.512–0.515 after question-centring |
 
@@ -91,6 +91,7 @@ review). Tables are emitted as Markdown alongside the figures.
 | TB-6 | Escalation operating points at 90 / 95 / 99% answered-set accuracy |
 | TB-7 | Encoder rank stability (bge-large vs mxbai), per functional |
 | TB-8 | Generation-seed variance across g ∈ {0, 1, 2} |
+| T9b | **MATH oracle audit on real answers** — the canonical-class partition re-adjudicated by an independent numeric route; false merges and false splits counted (`scripts/audit_math_oracle.py`) |
 | **TB-9** | **Diversity vs coverage head to head** — paired per-question difference, per model, dataset, rule, hardness tercile, MATH level and tail stratum, on both variability spaces |
 
 ## Two conventions that matter for correctness

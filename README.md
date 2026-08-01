@@ -91,19 +91,25 @@ Two refinements this study adds:
   <img src="assets/P-A4.png" width="92%" alt="Embedding-kernel concentration is question-specific">
 </p>
 
-Both functionals are functionals *of a similarity kernel*. On pools of chains
-that all answer **the same question**, the raw sentence-embedding kernel is
-nearly rank-1: the leading eigenvalue holds **94%** of the spectral mass and
-`VS₁ ≈ 1.4` among 40 genuinely different chains — the "all items identical"
-floor of the effective-number axiom. Different objectives then pick the *same*
-chains 22% of the time.
+Both functionals are functionals *of a similarity kernel*, so what they measure
+is decided by the kernel. On pools of chains that all answer **the same
+question**, the raw sentence-embedding kernel is nearly rank-1: the leading
+eigenvalue holds **94%** of the spectral mass and `VS₁ ≈ 1.4` among 40 lexically
+distinct chains. That is not the score misbehaving — distinct strings need not
+be dissimilar, and the score is faithfully reporting that, to the encoder,
+chains about one question look alike. But it means the raw kernel measures
+*which question is being answered*, not *how the chains differ in answering it*
+— and under it, different objectives pick the *same* chains 22% of the time,
+leaving the diversity-vs-coverage comparison nothing to distinguish.
 
 The standard anisotropy correction (removing corpus-wide directions) **barely
-helps** — VS₁ reaches only 2.15. The concentration is **question-specific**: no
-small set of corpus directions can remove 96 different question topics.
-Re-expressing chains as deviations from **their own question's centroid**
-restores VS₁ ≈ 9.3 and drops identical selection to 0.06. Replicated on 3
-models, 2 model families, 2 datasets.
+helps** — VS₁ reaches only 2.15, because the concentration is
+**question-specific**: no small set of corpus directions can remove 96 different
+question topics. Re-expressing chains as deviations from **their own question's
+centroid** — an experimental representation targeting within-question
+variability, not a claim that the raw kernel computes VS wrongly — restores
+VS₁ ≈ 9.3 and drops identical selection to 0.06. Replicated on 3 models, 2 model
+families, 2 datasets.
 
 <p align="center">
   <img src="assets/P-A5.png" width="88%" alt="The near-rank-1 kernel across five encoder families">
@@ -123,7 +129,7 @@ even after correction.
 <p align="center">
   <img src="assets/P-0c.png" width="85%" alt="Effective-number axiom on synthetic pools">
 </p>
-<p align="center"><em>The axiom the raw kernel violated: N balanced dissimilar classes score exactly N for every order q (left); the orders separate under imbalance (right).</em></p>
+<p align="center"><em>The effective-number reference points: N mutually dissimilar classes score exactly N for every order q (left); the orders separate under imbalance (right).</em></p>
 
 ---
 
@@ -137,20 +143,27 @@ even after correction.
 
 **The variability space decides whether the two differ at all.** On the
 question-centred *embedding* kernel they are statistically indistinguishable in
-the large majority of conditions (152 of 162 ties). On the *answer* kernel they
+the large majority of conditions (149 of 162 ties). On the *answer* kernel they
 separate sharply — and the aggregation rule picks the winner, with no exceptions
 across six model×dataset cells:
 
 | aggregation rule | winner | mean (diversity − coverage) | vs random: diversity | vs random: coverage | cells agreeing |
 |---|---|---:|---:|---:|---|
-| **pass@k** | **diversity** | **+0.163** | +0.032 | −0.131 | **6/6** |
-| **majority vote** | **coverage** | −0.166 | −0.186 | −0.020 | **6/6** |
-| **verifier best-of-n** | **coverage** | −0.213 | −0.167 | +0.046 | **6/6** |
+| **pass@k** | **diversity** | **+0.169** | +0.033 | −0.135 | **6/6** |
+| **majority vote** | **coverage** | −0.161 | −0.190 | −0.029 | **6/6** |
+| **verifier best-of-n** | **coverage** | −0.211 | −0.173 | +0.039 | **6/6** |
 
 Each verdict is the **paired per-question difference** between the diversity arm
 (VS₁) and the coverage arm — comparing each to random separately cannot say
 which is better, since both can beat random while being indistinguishable from
 one another.
+
+**It is not an artifact of the subsample size.** The table above is measured at a
+40-chain pool. Repeating the whole comparison on the **full 1024-chain pools**
+reproduces every sign with larger magnitudes — pass@k +0.300 to diversity,
+majority vote −0.266 and verifier best-of-n −0.274 to coverage, still 6/6 —
+while the embedding kernel stays a tie in 160 of 162 conditions (|Δ| ≤ 0.016).
+The separation grows with pool size rather than washing out.
 
 **The mechanism is exact, not statistical.** On a block kernel, greedy VS_q
 picks one chain per distinct answer. The pseudo log-determinant is maximised by
@@ -167,24 +180,25 @@ confident mode (voting, verifier).
 > diversity effect to the wrong functional.
 
 **Winning the head-to-head is not the same as being useful.** Against random,
-diversity gains on pass@k (+0.032) while coverage does not reliably beat random
-on majority vote (−0.020). The head-to-head says which measure to prefer for a
-given rule; the vs-random columns say whether either is worth using at all.
+diversity gains on pass@k (+0.033) while coverage does *not* beat random on
+majority vote (−0.028), and at the full pool it does not beat random on the
+verifier rule either (−0.043). The head-to-head says which of the two measures
+to prefer for a given rule; the vs-random columns say whether either is worth
+using at all — and for several rules neither is.
 
 ## (c) How does it depend on tail-heaviness?
 
-<p align="center">
-  <img src="assets/P-2g.png" width="88%" alt="Winnable share bounds the achievable gain">
-</p>
+Tail-heaviness — where the correct answer ranks in the pool's answer
+distribution — is what the conditioned results are organised by. The partition
+is qualitative and was fixed in advance: **modal** questions cannot be lost by a
+vote, **absent** questions cannot be won by any selector, and only the
+present-but-not-modal remainder is contestable.
 
-Tail-heaviness is what governs the whole picture. A selector cannot lose a
-question whose correct answer is already **modal**, and cannot win one where the
-answer is **absent**. Only *present-but-not-modal* questions are contestable,
-and that **winnable share** predicts the achievable gain (r = +0.61) better than
-raw headroom (r = +0.48), which overcounts by including unwinnable questions.
-
-That is why effects are small (2–7 points) and vanish on the strongest model:
-by then almost every question is already modal.
+> **A retracted intermediate claim.** An earlier five-cell analysis suggested
+> the *size* of that contestable share predicted the achievable gain
+> (r = +0.6 to +0.75). At the final scale the correlation collapsed (pass@k
+> r = +0.06; negative for the other rules). That pattern was a small-sample
+> artifact and is retracted; only the qualitative partition stands.
 
 ---
 
@@ -198,7 +212,7 @@ by then almost every question is already modal.
 | **Models** | Qwen2.5-0.5B · Qwen2.5-1.5B · Llama-3.2-3B (pass@1 0.27 → 0.71) |
 | **Datasets** | GSM8K ([Cobbe et al. 2021][gsm8k]) · MATH levels 1–5 ([Hendrycks et al. 2021][math]) |
 | **Questions** | 192 / 96 / 96 (GSM8K); 180 / 120 / 60 (MATH, level-stratified) |
-| **Chains** | 1024 per question; T = 1.0, top-p 0.95; ~900k chains |
+| **Chains** | 1024 per question; T = 1.0, top-p 0.95; 761,856 chains (811,008 with seed-variance banks) |
 | **Variability spaces** | K<sub>emb</sub> (question-centred primary; raw + corpus-anisotropy arms) · K<sub>ans</sub> · K<sub>α</sub> interpolating between them, α ∈ {0 … 1} |
 | **Selection** | greedy per objective (batched, provably identical to naive greedy); k ∈ {2,3,4,8,16,32}; pools of 40 and 1024; every arm averaged over 5 subsample draws |
 | **Aggregation** | majority vote ([Wang et al. 2023][sc]) · pass@k ([Chen et al. 2021][passk]) · verifier best-of-n |
@@ -216,6 +230,7 @@ by then almost every question is already modal.
 | cross-encoder rank stability | τ ≈ 0.83–0.90 for coverage and every q ≥ 0.1 |
 | Eq. 7 monotonicity and Eq. 8 bound | **0 violations in 1,728 real spectra** |
 | effective-number axiom | exact for every q on synthetic pools |
+| MATH answer-equivalence oracle, audited on 2,772 real answers | **0 false merges, 0 false splits** vs an independent numeric adjudicator |
 | kernel validity (symmetric, PSD, unit diagonal) | enforced for every kernel variant |
 | implementation vs published equations | 36 tests transcribing Eq. 1, 6, 7, 8 and Thm 4.1 |
 

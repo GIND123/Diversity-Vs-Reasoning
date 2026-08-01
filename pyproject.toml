@@ -38,6 +38,12 @@ analysis = [
   "seaborn>=0.13",
   "statsmodels>=0.14",
 ]
+audit = [
+  # sympy's LaTeX parser needs the antlr runtime. Only the oracle audit uses
+  # it, and deliberately so: it must not share a parsing route with the
+  # canonicaliser it is auditing.
+  "antlr4-python3-runtime==4.11",
+]
 dev = [
   "mypy>=1.10",
   "pre-commit>=3.7",

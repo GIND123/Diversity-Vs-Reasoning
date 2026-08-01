@@ -371,13 +371,13 @@ random while being indistinguishable from each other. The right test is the
 
 **The variability space decides whether they differ at all.** On the
 question-centred embedding kernel they are statistically indistinguishable in
-152 of 162 conditions. On the answer kernel they separate sharply:
+149 of 162 conditions. On the answer kernel they separate sharply:
 
 | aggregation rule | winner | mean (div − cov) | div vs random | cov vs random | cells |
 |---|---|---|---|---|---|
-| pass@k | **diversity** | +0.163 | +0.032 | −0.131 | 6/6 |
-| majority vote | **coverage** | −0.166 | −0.186 | −0.020 | 6/6 |
-| verifier best-of-n | **coverage** | −0.213 | −0.167 | +0.046 | 6/6 |
+| pass@k | **diversity** | +0.169 | +0.033 | −0.135 | 6/6 |
+| majority vote | **coverage** | −0.161 | −0.190 | −0.029 | 6/6 |
+| verifier best-of-n | **coverage** | −0.211 | −0.173 | +0.039 | 6/6 |
 
 Perfect sign agreement across all six model×dataset cells.
 
@@ -403,51 +403,80 @@ concrete consequence of "low q is still diversity, not coverage": the two
 objectives are not merely different in name, they select *opposite* sets.
 
 **Caution.** Winning head-to-head is not the same as being useful. Diversity
-gains over random on pass@k (+0.032), but coverage does *not* reliably beat
-random on majority vote (−0.020). The head-to-head says which measure to prefer
-for a given rule; the vs-random columns say whether either is worth using.
+gains over random on pass@k (+0.033), but coverage does *not* beat random on
+majority vote (−0.028). The head-to-head says which measure to prefer for a
+given rule; the vs-random columns say whether either is worth using at all.
+
+**Robustness at the full pool.** Repeating the entire test on the 1024-chain
+pools reproduces every sign with larger magnitudes (pass@k +0.300, majority vote
+−0.266, verifier −0.274, still 6/6), while the embedding kernel stays a tie in
+160 of 162 conditions. One thing changes: at full scale coverage no longer beats
+random on the verifier rule either (−0.043). It still beats *diversity* there,
+but neither arm is worth using over random for that rule.
 
 ### 7.3 The winner map
 
-At k = 8 on the question-centred kernel, across 6 cells:
+At k = 8 on the question-centred kernel, across 6 cells. Only entries whose
+bootstrap CI excludes zero and whose effect clears the practical null (|δ| ≥
+0.01) are listed; the Holm column is corrected within its family.
 
-| finding | effect | evidence |
+| finding | δ | evidence |
 |---|---|---|
-| VS_2 beats random on pass@k (Qwen-0.5B/GSM8K, 192q) | **+0.033** | CI [+0.014, +0.054], Holm p = 0.028 |
-| VS_∞ beats random on pass@k (Qwen-1.5B/GSM8K) | +0.020 | CI [+0.006, +0.035] |
-| **Coverage** helps pass@k on the **tail** stratum | **+0.068** | CI [+0.014, +0.121], n = 27 |
-| VS_1 helps pass@k on MATH (Qwen-0.5B) | +0.039 | CI [+0.010, +0.075] |
-| **Coverage** leads majority vote on MATH (Qwen-0.5B) | +0.034 | CI [−0.001, +0.071] |
-| Everything on Llama-3.2-3B | ≈ 0 | all CIs include zero |
+| VS_2 beats random on pass@k (Qwen-0.5B/GSM8K, 192q) | **+0.033** | CI [+0.014, +0.054], **Holm p = 0.028** |
+| VS_∞ beats random on pass@k (Qwen-1.5B/GSM8K) | **+0.020** | CI [+0.006, +0.035], **Holm p = 0.048** |
+| VS_2 beats random on majority vote, modal stratum (Qwen-0.5B/GSM8K) | **+0.035** | CI [+0.014, +0.059], **Holm p = 0.016** |
+| VS_1 beats random on pass@k, modal stratum (Qwen-1.5B/MATH) | **+0.015** | CI [+0.005, +0.027], **Holm p = 0.008** |
+| VS_0.1 beats random on pass@k, minority stratum (Llama/GSM8K) | +0.128 | CI [+0.046, +0.210], Holm p = 0.008 — but **n = 5 questions** |
+| Coverage beats random on pass@k, tail stratum, Qwen-0.5B/GSM8K only | +0.068 | CI [+0.014, +0.121], n = 27, **Holm p = 0.096, not significant after correction**; does not reproduce in the other five cells |
+| Everything else on Llama-3.2-3B at the cell level | ≈ 0 | all six CIs include zero |
 
-**The shape of the answer**: diversity orders tend to win **pass@k** (you want
-to *hit* the answer, so spread out), while coverage does relatively better on
-**majority vote** and on **tail-heavy** questions (where the answer is rare and
-you need volume to reach it). This is the qualitative separation the study was
-built to find — but the effects are small (2–7 points) and mostly not
-Holm-significant on their own.
+**Read this table carefully — it is the weakest evidence in the study, not the
+strongest.** These are *vs-random* comparisons on the question-centred embedding
+kernel, the same kernel on which the head-to-head test (7.2) finds diversity and
+coverage statistically indistinguishable in 149 of 162 conditions. So the
+apparent "winners" here are mostly which arm drew the luckier sample. Coverage
+appears exactly once, at Holm p = 0.096, in one cell out of six.
 
-### 7.4 What bounds how much any selector can gain
+The separation the study actually found is the one in **7.2, on the answer
+kernel**, where the sign agreement is 6/6 and the effects are 0.17–0.21 rather
+than 0.02–0.07. Where the two disagree, 7.2 governs.
+
+> **Two entries were removed here after a bug fix.** Earlier versions of this
+> table listed "VS_1 helps pass@k on MATH (Qwen-0.5B), +0.039" and "coverage
+> leads majority vote on MATH (Qwen-0.5B), +0.034". Both were computed before
+> the answer-equivalence oracle was repaired (§8, defect 7) and neither survives
+> on the corrected answer classes: they are now +0.006 and +0.014 with CIs
+> including zero.
+
+### 7.4 What bounds how much any selector can gain — a retracted claim
 
 Effects vanish on Llama, which at first looked like "stronger models don't
-benefit". That explanation was **incomplete** — Llama/MATH has plenty of
-headroom yet still shows nothing.
+benefit". That explanation is incomplete: Llama/MATH has plenty of headroom yet
+still shows nothing.
 
-The better predictor is the **winnable share**: the fraction of questions whose
-correct answer is *present in the pool but not the mode*.
+At an intermediate stage of this study, a five-cell analysis suggested a better
+predictor — the **winnable share**, the fraction of questions whose correct
+answer is *present in the pool but not the mode* — correlating with the best
+achievable pass@k gain at r ≈ +0.6 to +0.75, ahead of raw headroom.
+
+> **That correlation did not survive.** Once the MATH banks reached their final
+> size, it collapsed to **r = +0.063** for pass@k, and it is *negative* for the
+> other two rules (majority vote −0.259, verifier best-of-n −0.356), on n = 6
+> cells. **The claim is retracted.** Six points cannot support a predictive law
+> in either direction, and if you have seen an earlier version of this write-up
+> quoting r = +0.61, that number is wrong.
+
+What still stands is only the **qualitative partition**, which was fixed before
+looking at outcomes and follows from the definitions rather than from data:
 
 - If the answer is already **modal**, majority vote gets it without help.
-- If the answer is **absent**, no objective can recover it — a capability bound.
-- Only **minority + tail** questions are contestable.
+- If the answer is **absent** from the pool, no selection objective can recover
+  it — this is a bound on the generator, not on the selector.
+- Only **minority + tail** questions are contestable at all.
 
-| predictor | corr with best pass@k gain |
-|---|---|
-| **winnable share** | **r = +0.61** |
-| headroom (1 − random accuracy) | r = +0.48 |
-
-Headroom overcounts, because absent questions inflate it while offering nothing
-to win. This is descriptive across 6 cells, not an estimated law — but the
-partition was fixed in advance, so it is not data dredging.
+The partition tells you *where* a selector could possibly act. It does **not**
+tell you how much any selector will gain there — that is exactly the inference
+the collapsed correlation fails to license.
 
 ### 7.5 q-inertness on the answer kernel
 
@@ -520,6 +549,39 @@ continuous kernels.
 and produced a spurious **−0.99** diversity–coverage anticorrelation on MATH. At
 a common budget the relationship is consistent everywhere (+0.88 to +0.96).
 
+**7. The MATH answer oracle silently merged unrelated answers into the class of
+"0".** This is the worst defect found, because it corrupts the *answer kernel* —
+the exact space the headline result lives in. The LaTeX rewriter matched
+`\frac` with a regex that could not see nested braces, so
+`\frac{1}{2\sqrt{10}}` fell through to a fallback that stripped every brace and
+backslash, leaving `frac(1)(2sqrt(10))`. Sympy read `frac` as **its own**
+fractional-part function, `frac(1) = 0`, and the whole product evaluated to 0 —
+so the answer joined the equivalence class of the literal answer "0". The same
+stripping made `\text{0}` into `t*e*x*t*0 = 0`, `-\infty` into `-f*i*n*t*y`,
+and read the mixed number `0\frac{2}{5}` as `0 × 2/5 = 0`.
+
+Across all 360 MATH banks this put **1.33% of parsed chains (4,303 of 324,590)**
+into a contaminated class, affecting **90 of 360** banks and up to **42.6%** of a
+single question's chains. A *false merge* is the dangerous direction: it inflates
+the modal answer class and deflates answer-space diversity.
+
+It was found by building an audit that re-adjudicates the partition on real
+answers using an independent numeric route (`scripts/audit_math_oracle.py`).
+Before the fix, **131 of 292** adjudicable within-class pairs were false merges;
+after, **0 false merges and 0 false splits** across 346 adjudicable pairs. The
+fix is a brace-balanced expander that **refuses** any LaTeX command it does not
+explicitly handle rather than stripping it to a residue that happens to parse —
+refusing splits equivalent answers, which only over-counts diversity, whereas
+guessing merged different ones. All MATH cells were regenerated. The head-to-head
+verdict was unchanged (6/6 on every rule, magnitudes slightly larger), but two
+entries in the §7.3 winner map did not survive.
+
+**The general lesson.** Both this and error 1 were *silent*: the code ran to
+completion and produced plausible numbers. Neither would have been caught by a
+unit test written against the same understanding that produced the bug. What
+caught them was checking the output against an **independently constructed**
+answer — a self-check for error 1, a different parser for this one.
+
 ---
 
 ## 9. How to defend each claim
@@ -536,12 +598,16 @@ is τ ≈ 0.83–0.90 for coverage and every q ≥ 0.1.
 Eq. 8 and Theorem 4.1 directly from the paper and check our code against them;
 plus Eq. 7 and 8 verified on 1,728 real spectra.
 
-**"Your effects are tiny."** Correct, and stated plainly. They are bounded by the
-winnable share, which we measure. Independent work reports the same shape: DPP-
-based diverse selection gives "slightly higher diversity but insignificant
-improvements in downstream performance" [[Deprez et al. 2026](#refs)], and
-over-optimising a diversity objective can make it a poor downstream proxy
-[[Bilmes et al. 2026](#refs)].
+**"Your effects are tiny."** On the *embedding* kernel, correct, and stated
+plainly — that is itself the finding (§7.2: the two objectives are
+indistinguishable there in 149 of 162 conditions). On the *answer* kernel the
+effects are large, 0.17–0.21, with 6/6 sign agreement. Independent work reports
+the same shape for embedding-space selection: DPP-based diverse selection gives
+"slightly higher diversity but insignificant improvements in downstream
+performance" [[Deprez et al. 2026](#refs)], and over-optimising a diversity
+objective can make it a poor downstream proxy [[Bilmes et al. 2026](#refs)]. We
+do **not** claim the effects are bounded by the winnable share — see §7.4, where
+that claim is retracted.
 
 **"Why does facility location keep winning majority vote?"** Consistent with
 [[Bilmes et al. 2026](#refs)], who find facility location performs best among

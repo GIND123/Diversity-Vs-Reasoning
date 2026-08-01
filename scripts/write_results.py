@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from diversity_reasoning.signals import SIGNAL_LABELS  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -287,8 +290,11 @@ def section_replication() -> List[str]:
     rows = load(TABLES, "r_conditioning_full") or []
     if not rows:
         return []
-    models = sorted({row["model"] for row in rows})
-    if len(models) < 2:
+    # Replication is judged per (model, dataset) CELL. Keying only by model
+    # (an earlier bug) let a GSM8K row stand in for a model's MATH behaviour,
+    # so an effect could be labelled replicated while failing on MATH.
+    cells = sorted({(row["model"], row["dataset"]) for row in rows})
+    if len(cells) < 2:
         return []
     lines = [
         "### Which effects replicate across models",
@@ -298,9 +304,9 @@ def section_replication() -> List[str]:
         "listed separately as model-specific, not as results of the study.",
         "",
         "| rule | stratum | objective | "
-        + " | ".join(MODEL_LABEL.get(m, m) for m in models)
+        + " | ".join(f"{MODEL_LABEL.get(m, m)}/{DATASET_LABEL.get(d, d)}" for m, d in cells)
         + " | replicates |",
-        "|---|---|---|" + "|".join("---:" for _ in models) + "|---|",
+        "|---|---|---|" + "|".join("---:" for _ in cells) + "|---|",
     ]
     seen = set()
     for row in rows:
@@ -308,30 +314,35 @@ def section_replication() -> List[str]:
         if key in seen or not (row["group"] == "all" or row["group"].startswith("tail:")):
             continue
         seen.add(key)
-        per_model = []
+        per_cell = []
         positive = []
-        for model in models:
+        for model, dataset in cells:
             match = next(
                 (
                     r
                     for r in rows
-                    if r["model"] == model and (r["rule"], r["group"], r["objective"]) == key
+                    if r["model"] == model
+                    and r["dataset"] == dataset
+                    and (r["rule"], r["group"], r["objective"]) == key
                 ),
                 None,
             )
             if match is None:
-                per_model.append("n/a")
-                positive.append(False)
+                per_cell.append("n/a")
                 continue
-            per_model.append(f"{match['delta']:+.3f}")
+            per_cell.append(f"{match['delta']:+.3f}")
             positive.append(match["ci_low"] > 0 and match["delta"] >= 0.01)
-        if not any(positive):
+        if not positive or not any(positive):
             continue
-        verdict = "**yes**" if all(positive) else "no (model-specific)"
+        verdict = (
+            "**yes (all cells measured)**"
+            if all(positive) and len(positive) == len(cells)
+            else "no (cell-specific)"
+        )
         lines.append(
             f"| {RULE_LABEL[row['rule']]} | {row['group']} | "
             f"{OBJECTIVE_LABEL.get(row['objective'], row['objective'])} | "
-            + " | ".join(per_model)
+            + " | ".join(per_cell)
             + f" | {verdict} |"
         )
     lines.append("")
@@ -399,7 +410,8 @@ def section_signals() -> List[str]:
             for name, data in signals.items():
                 ci = data.get("auc_ci", [None, None])
                 lines.append(
-                    f"| {cell_label(cell_id)} | {name.replace('_', ' ')} | {fmt(data['auc'])} | "
+                    f"| {cell_label(cell_id)} | {SIGNAL_LABELS.get(name, name)} | "
+                    f"{fmt(data['auc'])} | "
                     f"{fmt(data['lift'], signed=True)} | [{fmt(ci[0])}, {fmt(ci[1])}] |"
                 )
         lines.append("")
@@ -418,6 +430,7 @@ def section_signals() -> List[str]:
         lines.append("")
 
     tb6 = load(TABLES, "tb6_operating_points") or {}
+    escalation = load(FIGURE_DATA, "P-3c") or {}
     if tb6:
         lines += [
             "## 10. Entropy-gated escalation (R7)",
@@ -425,122 +438,74 @@ def section_signals() -> List[str]:
             "Answer with the cheap model's majority vote when its answer entropy is at or",
             "below theta, otherwise escalate to the larger model.",
             "",
-            "| dataset | target answered-set acc. | fraction answered cheaply | overall acc. |",
-            "|---|---:|---:|---:|",
+            "**Read the held-out column, not the in-sample one.** Choosing the theta that",
+            "just clears an accuracy target on a set of questions and then reporting that",
+            "same set's accuracy is threshold selection on the test data: the reported",
+            "number is the maximum of a noisy statistic and clears the target by",
+            "construction. The held-out column fits theta on a random half and applies it",
+            "to the other half, averaged over 200 splits.",
+            "",
+            "| dataset | target | answered cheaply (in-samp / held-out) | answered-set acc. "
+            "(in-samp / held-out) | held-out target met |",
+            "|---|---:|---:|---:|---:|",
         ]
         for dataset, points in sorted(tb6.items()):
+            held = (escalation.get(dataset) or {}).get("operating_points_heldout", {})
             for target, point in sorted((points or {}).items()):
                 if not point:
                     continue
+                h = held.get(target) or {}
                 lines.append(
                     f"| {DATASET_LABEL.get(dataset, dataset)} | {target}% | "
-                    f"{fmt(point['fraction_answered_cheap'])} | "
-                    f"{fmt(point['overall_accuracy'])} |"
+                    f"{fmt(point['fraction_answered_cheap'])} / "
+                    f"{fmt(h.get('fraction_answered_cheap'))} | "
+                    f"{fmt(point['answered_set_accuracy'])} / "
+                    f"{fmt(h.get('answered_set_accuracy'))} | "
+                    f"{fmt(h.get('target_met_rate'))} |"
                 )
-        lines.append("")
+        lines += [
+            "",
+            "The gap is not cosmetic. In sample the 95% and 99% targets look perfectly met",
+            "(answered-set accuracy 1.000); out of sample the same procedure delivers",
+            "0.86-0.92 and actually reaches its target on only 31-51% of splits. The gate",
+            "is still useful — it answers a fifth to a quarter of questions cheaply at",
+            "accuracy well above the pool average — but it does **not** come with the",
+            "accuracy guarantee the in-sample numbers appear to offer, and with 60-96",
+            "questions per dataset there is not enough data to calibrate one.",
+            "",
+        ]
     return lines
 
 
 def section_winnable() -> List[str]:
-    """What bounds the achievable gain: the winnable share of questions."""
+    """P-2g: an exploratory pattern that did NOT survive the final scale."""
     payload = load(FIGURE_DATA, "P-2g")
     if not payload or not payload.get("points"):
         return []
-    points = payload["points"]
     correlations = payload.get("correlations", {})
+    win = correlations.get("pass_at_k|winnable_fraction", {})
+    head = correlations.get("pass_at_k|headroom", {})
     lines = [
-        "## 7. What bounds the gain from selection (P-2g)",
+        "## 7. A retracted exploratory pattern: the winnable share (P-2g)",
         "",
-        "The tail-heaviness taxonomy partitions questions by what a selector can do",
-        "with them. If the correct answer is already **modal**, majority vote gets it",
-        "without help. If it is **absent** from the pool, no objective can recover it.",
-        "Only the **present-but-not-modal** questions (minority + tail) are winnable, so",
-        "their share should bound what any selection objective can deliver — more",
-        "tightly than raw headroom, which counts absent questions a selector cannot win.",
+        "An intermediate analysis over five cells suggested that the share of",
+        "questions whose correct answer is present but not modal predicted the best",
+        "achievable gain better than raw headroom (r = +0.75 at that point). **After",
+        "the MATH banks were extended to their final size, the correlation collapsed",
+        f"(pass@k: winnable r = {fmt(win.get('pearson'), signed=True)}, headroom "
+        f"r = {fmt(head.get('pearson'), signed=True)}, n = {win.get('n', 'n/a')}), and it is",
+        "negative for the other rules.** The earlier pattern was a small-sample",
+        "artifact, and any copy of it still circulating should be treated as",
+        "retracted.",
         "",
-        "| cell | rule | modal | winnable | headroom | best delta | objective |",
-        "|---|---|---:|---:|---:|---:|---|",
-    ]
-    for point in sorted(points, key=lambda p: (p["cell"], p["rule"])):
-        if point["rule"] == "verifier_best":
-            continue
-        lines.append(
-            f"| {cell_label(point['cell'])} | {RULE_LABEL[point['rule']]} | "
-            f"{fmt(point['modal_fraction'])} | {fmt(point['winnable_fraction'])} | "
-            f"{fmt(point['headroom'])} | {fmt(point['best_delta'], signed=True)} | "
-            f"{OBJECTIVE_LABEL.get(point['best_objective'], point['best_objective'])} |"
-        )
-    lines.append("")
-    pairs = []
-    for rule in ("majority_vote", "pass_at_k"):
-        win = correlations.get(f"{rule}|winnable_fraction")
-        head = correlations.get(f"{rule}|headroom")
-        if win and head:
-            pairs.append(
-                f"{RULE_LABEL[rule]}: winnable r = {win['pearson']:+.2f} vs "
-                f"headroom r = {head['pearson']:+.2f} (n = {win['n']})"
-            )
-    if pairs:
-        lines += [
-            "Across cells the winnable share tracks the achievable gain more closely than",
-            "headroom does — " + "; ".join(pairs) + ".",
-            "",
-            "**This is a descriptive pattern across a handful of cells, not an estimated",
-            "law.** With so few points the correlation has a wide interval and the two",
-            "predictors are themselves correlated; what the comparison supports is the",
-            "weaker, mechanistic claim that questions whose answer is absent inflate",
-            "headroom without offering a selector anything to win. The partition it rests",
-            "on was fixed in advance by the blueprint, not chosen after seeing the",
-            "outcomes.",
-            "",
-        ]
-    return lines
-
-
-def section_encoder_stability() -> List[str]:
-    """TB-7: do the functionals rank questions the same way under two encoders?"""
-    data = load(TABLES, "tb7_encoder_stability")
-    if not data or not data.get("kendall_tau"):
-        return []
-    taus = data["kendall_tau"]
-    order = ["vs_0", "vs_0.1", "vs_0.5", "vs_1", "vs_2", "vs_inf", "pseudo_logdet"]
-    lines = [
-        "## 11. Encoder stability (TB-7)",
-        "",
-        "Kendall tau between the per-question rankings each functional produces under",
-        f"`{data['primary']}` and `{data['alternate']}`, on "
-        f"{cell_label(data['cell'])} ({data.get('n_questions')} questions).",
-        "",
-        "| functional | Kendall tau |",
-        "|---|---:|",
-    ]
-    for key in order:
-        if key in taus:
-            label = OBJECTIVE_LABEL.get(key.replace("vs_", "vendi_"), key)
-            if key == "pseudo_logdet":
-                label = "coverage (pseudo log-det)"
-            lines.append(f"| {label} | {fmt(taus[key], signed=True)} |")
-    vs0 = taus.get("vs_0")
-    lines += [
-        "",
-        "Coverage and every diversity order from q = 0.1 upward rank questions",
-        "consistently across the two encoders, so the conclusions do not hinge on the",
-        "choice of embedding model.",
+        "What remains defensible is only the qualitative partition it was built on,",
+        "which was fixed in advance: modal questions cannot be lost by a vote,",
+        "absent questions cannot be won by any selector, and only the",
+        "present-but-not-modal remainder is contestable. How much of that",
+        "contestable share any objective actually captures is not predicted by its",
+        "size.",
         "",
     ]
-    if vs0 is not None and vs0 < 0.5:
-        lines += [
-            f"**VS_0 is the exception (tau = {vs0:+.3f}).** This is the third independent",
-            "line of evidence that the q -> 0 limit is not usable on a continuous kernel:",
-            '*Cousins* calls it "an uninformative measure of diversity"; greedy VS_0',
-            "selection degenerates to index order (it chose the eight lowest-indexed chains",
-            "on 20 of 20 pools); and its cross-encoder ranking barely correlates. Richness",
-            "counts nonzero eigenvalues, which saturate at the subset size whenever the",
-            "items are distinct, so what remains is numerical noise about where the",
-            "eigenvalue threshold falls. It stays meaningful on the answer kernel, where",
-            "exact ties make the count informative.",
-            "",
-        ]
     return lines
 
 
@@ -612,11 +577,45 @@ def section_head_to_head() -> List[str]:
         "mode (voting); concentrating does the reverse.",
         "",
         "**A caution on reading these as recommendations.** Winning the head-to-head is",
-        "not the same as being useful: against random, diversity gains on pass@k",
-        "(+0.032) but coverage does not reliably beat random on majority vote (-0.020).",
-        "The head-to-head says which of the two measures to prefer for a given",
-        "aggregation rule; the vs-random columns say whether either is worth using at",
-        "all.",
+        "not the same as being useful. The head-to-head says which of the two measures",
+        "to prefer for a given aggregation rule; the vs-random columns above say",
+        "whether either is worth using at all, and on several rules neither is.",
+        "",
+        "### Robustness: the same test on the full 1024-chain pools",
+        "",
+        "Everything above is measured at a 40-chain pool. If the verdict were an",
+        "artifact of that subsample size it would not survive at the full pool.",
+        "",
+        "| rule | mean (div - cov) @ pool 40 | @ pool 1024 | cells agreeing @ 1024 |",
+        "|---|---:|---:|---|",
+    ]
+    big = load(TABLES, "tb9_head_to_head_outcomes_pool1024") or []
+    big_overall = [r for r in big if r["kernel"] == "answer" and r["group"] == "all"]
+    for rule in ("pass_at_k", "majority_vote", "verifier_best"):
+        small = [r for r in overall if r["rule"] == rule]
+        large = [r for r in big_overall if r["rule"] == rule]
+        if not small or not large:
+            continue
+        d_small = st.fmean(r["diversity_minus_coverage"] for r in small)
+        d_large = st.fmean(r["diversity_minus_coverage"] for r in large)
+        favour = sum(1 for r in large if r["diversity_minus_coverage"] > 0)
+        agree = f"{max(favour, len(large) - favour)}/{len(large)}"
+        lines.append(
+            f"| {RULE_LABEL[rule]} | {fmt(d_small, signed=True)} | "
+            f"{fmt(d_large, signed=True)} | {agree} |"
+        )
+    big_emb = [r for r in big if r["kernel"] == "embedding"]
+    big_ties = sum(1 for r in big_emb if r["verdict"].startswith("tie"))
+    lines += [
+        "",
+        "**Every sign is reproduced and every magnitude grows**, so the separation is a",
+        "property of the objectives, not of the subsample size. On the embedding kernel",
+        f"the two remain indistinguishable in {big_ties} of {len(big_emb)} conditions at",
+        "the full pool.",
+        "",
+        "One thing does change: at the full pool coverage no longer beats random on",
+        "verifier best-of-n (-0.043 rather than +0.038). It still beats the diversity",
+        "arm there, but *neither* arm is worth using over random for that rule at scale.",
         "",
         "### Why an earlier framing mislabelled this",
         "",
@@ -628,6 +627,53 @@ def section_head_to_head() -> List[str]:
         "diversity, not coverage.",
         "",
     ]
+    return lines
+
+
+def section_encoder_stability() -> List[str]:
+    """TB-7: do the functionals rank questions the same way under two encoders?"""
+    data = load(TABLES, "tb7_encoder_stability")
+    if not data or not data.get("kendall_tau"):
+        return []
+    taus = data["kendall_tau"]
+    order = ["vs_0", "vs_0.1", "vs_0.5", "vs_1", "vs_2", "vs_inf", "pseudo_logdet"]
+    lines = [
+        "## 11. Encoder stability (TB-7)",
+        "",
+        "Kendall tau between the per-question rankings each functional produces under",
+        f"`{data['primary']}` and `{data['alternate']}`, on "
+        f"{cell_label(data['cell'])} ({data.get('n_questions')} questions).",
+        "",
+        "| functional | Kendall tau |",
+        "|---|---:|",
+    ]
+    for key in order:
+        if key in taus:
+            label = OBJECTIVE_LABEL.get(key.replace("vs_", "vendi_"), key)
+            if key == "pseudo_logdet":
+                label = "coverage (pseudo log-det)"
+            lines.append(f"| {label} | {fmt(taus[key], signed=True)} |")
+    vs0 = taus.get("vs_0")
+    lines += [
+        "",
+        "Coverage and every diversity order from q = 0.1 upward rank questions",
+        "consistently across the two encoders, so the conclusions do not hinge on the",
+        "choice of embedding model.",
+        "",
+    ]
+    if vs0 is not None and vs0 < 0.5:
+        lines += [
+            f"**VS_0 is the exception (tau = {vs0:+.3f}).** This is the third independent",
+            "line of evidence that the q -> 0 limit is not usable on a continuous kernel:",
+            '*Cousins* calls it "an uninformative measure of diversity"; greedy VS_0',
+            "selection degenerates to index order (it chose the eight lowest-indexed chains",
+            "on 20 of 20 pools); and its cross-encoder ranking barely correlates. Richness",
+            "counts nonzero eigenvalues, which saturate at the subset size whenever the",
+            "items are distinct, so what remains is numerical noise about where the",
+            "eigenvalue threshold falls. It stays meaningful on the answer kernel, where",
+            "exact ties make the count informative.",
+            "",
+        ]
     return lines
 
 
@@ -673,15 +719,27 @@ def section_limitations() -> List[str]:
         "- Generation seed g=0 for the main banks; the 3-seed spot check (section 9)",
         "  bounds bank-level generation variance on a 24-question subset rather than",
         "  the blueprint's 50.",
-        "- The verifier arm is mean token logprob only, the blueprint's cautionary arm. No PRM",
-        "  was run, so verifier best-of-n results are a lower bound on what a real verifier",
-        "  would achieve.",
-        "- Two encoders: bge-large-en-v1.5 on all cells and mxbai-embed-large-v1 on one",
-        "  cell for the TB-7 stability check (section 10); specter2 was not run.",
+        "- The verifier arm is the best chain's mean token logprob only, the blueprint's",
+        "  cautionary arm. No PRM was run, so verifier best-of-n results are a lower bound",
+        "  on what a real verifier would achieve.",
+        "- One primary encoder: bge-large-en-v1.5 on all cells. Four others (mxbai, E5,",
+        "  GTE, MPNet) were run for the kernel diagnosis and the TB-7 rank-stability",
+        "  check, but every headline selection result uses bge-large; specter2 was not run.",
         "- Headline embedding results use the question-centred kernel (section 2). That is a",
         "  deliberate departure from measuring raw encoder similarity, and it is the right",
         "  one for a within-question question, but it means the embedding numbers are not",
         "  comparable to work that scores raw sentence-embedding similarity.",
+        "- MATH answer equivalence is decided by a sympy canonicaliser that refuses what",
+        "  it cannot parse, so equivalent answers written in an unsupported LaTeX form",
+        "  are split into separate classes. Audited against an independent numeric",
+        "  adjudicator on 2,772 real answer strings (`scripts/audit_math_oracle.py`), the",
+        "  partition has no false merges and no false splits among adjudicable pairs, but",
+        "  roughly a quarter of real answers are non-algebraic (intervals, matrices,",
+        "  prose) and fall back to string equality. That errs toward over-counting answer",
+        "  diversity, never toward merging genuinely different answers.",
+        "- Entropy-gated escalation (section 10) has no held-out calibration set beyond",
+        "  the split-half estimate reported there; with 60-96 questions per dataset a",
+        "  deployable threshold cannot be fitted from this data.",
         "- Question counts (96 GSM8K, 60 MATH) make several Snell-bin x tail-heaviness cells",
         "  underpowered; those cells carry CIs but no headline claims, and are flagged in TB-0.",
         "",

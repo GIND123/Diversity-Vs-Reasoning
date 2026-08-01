@@ -165,11 +165,91 @@ def _canonical_form(sympy: Any, expression: Any) -> str:
     return f"sym:{sympy.srepr(expression)}"
 
 
+def _brace_group(text: str, start: int) -> Tuple[str, int]:
+    """Contents of the ``{...}`` beginning at ``start``, honouring nesting.
+
+    A regex with ``[^{}]+`` cannot do this, and getting it wrong is not a
+    cosmetic failure: ``\\frac{1}{2\\sqrt{10}}`` fails to match, the braces and
+    backslashes are then stripped wholesale, and the residue parses as a call to
+    sympy's own ``frac`` (fractional part), which returns 0. Every such answer
+    silently joined the class of the literal answer "0".
+    """
+    if start >= len(text) or text[start] != "{":
+        raise ValueError("expected a brace group")
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : index], index + 1
+    raise ValueError("unbalanced brace group")
+
+
+def _expand_latex(text: str) -> str:
+    """Rewrite the LaTeX subset we support into plain infix, or refuse.
+
+    Refusing (raising) sends the answer to string comparison, which splits
+    equivalent answers into separate classes. That is the conservative
+    direction: it can only over-count answer diversity, never merge two
+    genuinely different answers into one class.
+    """
+    import re as _re
+
+    out = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char != "\\":
+            out.append(char)
+            index += 1
+            continue
+        match = _re.match(r"\\([A-Za-z]+)", text[index:])
+        if match is None:
+            raise ValueError(f"unsupported escape at {index}")
+        command = match.group(1)
+        index += match.end()
+        if command in {"frac", "dfrac", "tfrac"}:
+            # A digit immediately before the fraction is a mixed number in some
+            # writers and a product in others. Refusing beats guessing: an
+            # earlier version silently read 0\frac{2}{5} as 0 * 2/5 = 0.
+            if out and out[-1].isdigit():
+                raise ValueError("ambiguous mixed number")
+            numerator, index = _brace_group(text, index)
+            denominator, index = _brace_group(text, index)
+            out.append(f"(({_expand_latex(numerator)})/({_expand_latex(denominator)}))")
+        elif command == "sqrt":
+            if index < len(text) and text[index] == "{":
+                radicand, index = _brace_group(text, index)
+            else:
+                radicand, index = text[index], index + 1
+            out.append(f"sqrt(({_expand_latex(radicand)}))")
+        elif command == "pi":
+            out.append("pi")
+        elif command in {"cdot", "times"}:
+            out.append("*")
+        elif command in {"left", "right", "!", ","}:
+            continue
+        else:
+            # \text, \log_{10}, \infty, \begin{pmatrix}, ... Anything not
+            # explicitly handled is refused rather than stripped to a residue
+            # that happens to parse.
+            raise ValueError(f"unsupported command \\{command}")
+    return "".join(out)
+
+
+_ALLOWED_NAMES = {"sqrt", "pi", "E", "I", "e"}
+
+
 def _sympify(sympy: Any, value: str) -> Any:
     """Parse one normalized answer, converting the LaTeX forms sympy misses.
 
     Uses sympy's implicit-multiplication transformations so ordinary algebraic
-    answers such as ``2x`` parse the way a reader expects.
+    answers such as ``2x`` parse the way a reader expects. Multi-character
+    identifiers that are not known functions are refused: they are the residue
+    of an unhandled LaTeX command, and letting them through is how ``-\infty``
+    once became the product ``-f*i*n*t*y``.
     """
     import re as _re
 
@@ -179,13 +259,11 @@ def _sympify(sympy: Any, value: str) -> Any:
         standard_transformations,
     )
 
-    text = value.replace("^", "**")
-    text = _re.sub(r"\\d?frac\{([^{}]+)\}\{([^{}]+)\}", r"((\1)/(\2))", text)
-    text = _re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", text)
-    text = _re.sub(r"\\sqrt(\w)", r"sqrt(\1)", text)
-    text = text.replace("\\pi", "pi").replace("\\cdot", "*").replace("\\times", "*")
-    text = text.replace("\\left", "").replace("\\right", "").replace("\\%", "")
-    text = text.replace("{", "(").replace("}", ")").replace("\\", "")
+    text = _expand_latex(value.replace("^", "**").replace("\\%", "").replace("\\ ", " "))
+    text = text.replace("{", "(").replace("}", ")")
+    for name in _re.findall(r"[A-Za-z][A-Za-z_]+", text):
+        if name not in _ALLOWED_NAMES:
+            raise ValueError(f"unresolved identifier {name!r}")
     transformations = standard_transformations + (implicit_multiplication_application,)
     return parse_expr(text, transformations=transformations, evaluate=True)
 

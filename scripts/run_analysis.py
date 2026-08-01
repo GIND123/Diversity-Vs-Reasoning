@@ -563,7 +563,7 @@ def _hypothesis_strip(
                     {
                         "delta": best["delta"],
                         "ci": [best["ci_low"], best["ci_high"]],
-                        "verdict": "accept" if best["ci_low"] > 0 else "reject",
+                        "verdict": "supported" if best["ci_low"] > 0 else "not supported",
                         "detail": (
                             f"best objective {best['objective']} "
                             f"on {best['model']}/{best['dataset']}"
@@ -580,9 +580,9 @@ def _hypothesis_strip(
                     {
                         "delta": worst,
                         "ci": [0.0, worst],
-                        "verdict": "accept"
+                        "verdict": "supported (exact)"
                         if worst < 1e-9
-                        else ("accept~" if worst < 0.02 else "reject"),
+                        else ("supported approximately" if worst < 0.02 else "not supported"),
                         "detail": f"max accuracy spread across q on K_ans = {worst:.4f}",
                     }
                 )
@@ -596,16 +596,16 @@ def _hypothesis_strip(
                 null_expected = name == "H4"
                 if null_expected:
                     verdict = (
-                        "accept"
+                        "consistent (null not provable)"
                         if all(
                             r["ci_low"] <= 0 <= r["ci_high"] or abs(r["delta"]) < 0.01 for r in rows
                         )
-                        else "reject"
+                        else "not supported"
                     )
                 elif expected_negative:
-                    verdict = "accept" if stat["delta"] < 0 else "reject"
+                    verdict = "supported" if stat["delta"] < 0 else "not supported"
                 else:
-                    verdict = "accept" if stat["delta"] > 0 else "reject"
+                    verdict = "supported" if stat["delta"] > 0 else "not supported"
                 entry.update({**stat, "verdict": verdict, "n_cells": len(rows)})
         strip.append(entry)
     return strip
@@ -838,7 +838,7 @@ def assemble_metric_correlations() -> None:
         by_qid = {s["qid"]: s for s in signals}
         columns["answer entropy"] = [by_qid[qid]["answer_entropy"] for qid in qids]
         columns["vote margin"] = [by_qid[qid]["vote_margin"] for qid in qids]
-        columns["mean logprob"] = [by_qid[qid]["mean_logprob"] for qid in qids]
+        columns["best-chain mean logprob"] = [by_qid[qid]["mean_logprob"] for qid in qids]
         columns["pass@1"] = [strata[qid]["pass_at_1"] for qid in qids]
         columns["MV correct"] = [float(by_qid[qid]["mv_correct"]) for qid in qids]
         names = list(columns)
@@ -909,7 +909,7 @@ def assemble_quality_scatter() -> None:
     _write(FIGURE_DATA / "P-4b.json", per_cell)
 
 
-def assemble_head_to_head() -> None:
+def assemble_head_to_head(pool_file: str = "outcomes_pool40.json") -> None:
     """TB-9: diversity versus coverage, head to head, for every condition.
 
     The study's question is which of the two measures of variability is the
@@ -928,13 +928,19 @@ def assemble_head_to_head() -> None:
     The diversity arm is VS_1, the canonical Vendi Score. The best-performing
     order is reported alongside, flagged, since choosing an order after seeing
     outcomes inflates its apparent advantage.
+
+    Repeated on both the 40-chain and the full 1024-chain pools, because a
+    verdict that only holds at one subsample size is a statement about the
+    subsample, not about the objectives.
     """
     from diversity_reasoning.winner import delta_versus_random
 
     rows: List[Dict[str, Any]] = []
     for kernel_label, kernel_spec in (("embedding", EMB), ("answer", "answer")):
         for model, dataset in _available_cells():
-            path = ANALYSIS / model / dataset / "outcomes_pool40.json"
+            path = ANALYSIS / model / dataset / pool_file
+            if not path.exists():
+                continue
             outcomes = _normalize_outcomes(_load(path))
             strata = _strata_lookup(model, dataset)
             groups: Dict[str, Optional[set]] = {"all": None}
@@ -990,8 +996,10 @@ def assemble_head_to_head() -> None:
                             "best_order_acc": float(np.mean(arms[best_q])),
                         }
                     )
-    _write(TABLES / "tb9_head_to_head.json", rows)
-    _write(FIGURE_DATA / "P-5a.json", rows)
+    suffix = "" if pool_file == "outcomes_pool40.json" else f"_{Path(pool_file).stem}"
+    _write(TABLES / f"tb9_head_to_head{suffix}.json", rows)
+    if not suffix:
+        _write(FIGURE_DATA / "P-5a.json", rows)
 
 
 def _aligned_arms(
@@ -1001,15 +1009,24 @@ def _aligned_arms(
     budget: int = HEADLINE_BUDGET,
     kernel: str = EMB,
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
-    """Per-question outcomes for every arm, on exactly the same question set."""
+    """Per-question outcomes for every arm, on exactly the same question set.
+
+    Objectives absent from a given outcomes file are skipped rather than
+    aborting the whole cell: the full-pool robustness run carries a reduced arm
+    set (VS_1, VS_inf, coverage, facility location) on purpose. The two arms the
+    head-to-head verdict is *about* are required, so a missing one still fails
+    loudly instead of silently comparing something else.
+    """
     from diversity_reasoning.winner import accuracy_matrix, objective_names, random_matrix
 
     series: Dict[str, Dict[str, float]] = {}
     for objective in objective_names():
         qids, values = accuracy_matrix(outcomes, f"{kernel}|{objective}", budget, rule)
         if not qids:
-            return None
+            continue
         series[objective] = dict(zip(qids, values.tolist()))
+    if not {"vendi_1", "coverage"} <= set(series):
+        return None
     qids_r, random_mean, _ = random_matrix(outcomes, budget, rule)
     series["random"] = dict(zip(qids_r, random_mean.tolist()))
 
@@ -1217,6 +1234,7 @@ def stage_assemble() -> None:
     assemble_winner_map()
     assemble_winnable()
     assemble_head_to_head()
+    assemble_head_to_head("outcomes_pool1024.json")
     assemble_metric_correlations()
     assemble_quality_scatter()
     assemble_signals()

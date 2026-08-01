@@ -18,6 +18,17 @@ from .spectra import answer_entropy, functionals
 
 SIGNAL_NAMES = ("answer_entropy", "vote_margin", "mean_logprob", "embedding_vs1")
 
+# Display labels. `mean_logprob` is a question-level confidence built from
+# chain-level mean log-probabilities by taking the MAXIMUM over chains, i.e. the
+# best chain's score, not the pool's average. The unqualified name is ambiguous
+# and everything user-facing must use the label below.
+SIGNAL_LABELS = {
+    "answer_entropy": "answer entropy",
+    "vote_margin": "vote margin",
+    "mean_logprob": "best-chain mean logprob",
+    "embedding_vs1": "embedding VS_1",
+}
+
 
 def majority_class(pool: Pool) -> int:
     counts = pool.answer_counts()
@@ -31,6 +42,8 @@ def question_signals(pool: Pool) -> Dict[str, Any]:
     ordered = sorted(counts.values(), reverse=True)
     margin = (ordered[0] - (ordered[1] if len(ordered) > 1 else 0)) / max(1, pool.size)
     entropy = answer_entropy(list(counts.values()))["entropy"]
+    # Max over chains of each chain's mean token log-probability: the score of
+    # the single most confident chain. Reported as "best-chain mean logprob".
     verifier = float(pool.mean_logprobs().max())
     embedding_vs1: Optional[float] = None
     if pool.embeddings is not None:
@@ -145,10 +158,77 @@ def r7_escalation(
         ]
         best = max(qualifying, key=lambda p: p["fraction_answered_cheap"]) if qualifying else None
         operating_points[f"{int(target * 100)}"] = best
+
     return {
         "n_questions": len(shared),
         "cheap_accuracy": float(cheap_correct.mean()),
         "expensive_accuracy": float(expensive_correct.mean()),
         "curve": curve,
+        # In-sample: theta is chosen on the very questions it is then scored on,
+        # so the answered-set accuracy here is optimistically biased and is NOT
+        # an estimate of deployment behaviour. Kept for comparison only.
         "operating_points": operating_points,
+        "operating_points_heldout": _heldout_operating_points(
+            entropies, cheap_correct, expensive_correct
+        ),
     }
+
+
+def _heldout_operating_points(
+    entropies: np.ndarray,
+    cheap_correct: np.ndarray,
+    expensive_correct: np.ndarray,
+    *,
+    targets: Sequence[float] = (0.90, 0.95, 0.99),
+    repeats: int = 200,
+    seed: int = 0,
+) -> Dict[str, Any]:
+    """The same operating points, but with theta chosen out of sample.
+
+    Picking the threshold that just clears a target accuracy on a set and then
+    reporting that same set's accuracy is threshold selection on the test data:
+    the reported number is the maximum of a noisy statistic, so it clears the
+    target by construction. Here theta is fitted on a random half and applied to
+    the other half, repeated and averaged, which is what a deployment would see.
+    """
+    rng = np.random.default_rng(seed)
+    n = len(entropies)
+    if n < 8:
+        return {}
+    out: Dict[str, Any] = {}
+    for target in targets:
+        answered_fracs: List[float] = []
+        answered_accs: List[float] = []
+        overall_accs: List[float] = []
+        for _ in range(repeats):
+            order = rng.permutation(n)
+            fit, test = order[: n // 2], order[n // 2 :]
+            grid = np.quantile(entropies[fit], np.linspace(0, 1, 41))
+            chosen = None
+            for theta in sorted(grid, reverse=True):
+                mask = entropies[fit] <= theta
+                if mask.any() and float(cheap_correct[fit][mask].mean()) >= target:
+                    chosen = float(theta)
+                    break
+            if chosen is None:
+                answered_fracs.append(0.0)
+                answered_accs.append(float("nan"))
+                overall_accs.append(float(expensive_correct[test].mean()))
+                continue
+            mask = entropies[test] <= chosen
+            answered_fracs.append(float(mask.mean()))
+            answered_accs.append(
+                float(cheap_correct[test][mask].mean()) if mask.any() else float("nan")
+            )
+            overall_accs.append(
+                float(np.where(mask, cheap_correct[test], expensive_correct[test]).mean())
+            )
+        finite = [a for a in answered_accs if a == a]
+        out[f"{int(target * 100)}"] = {
+            "fraction_answered_cheap": float(np.mean(answered_fracs)),
+            "answered_set_accuracy": float(np.mean(finite)) if finite else None,
+            "overall_accuracy": float(np.mean(overall_accs)),
+            "target_met_rate": float(np.mean([a >= target for a in finite])) if finite else 0.0,
+            "repeats": repeats,
+        }
+    return out

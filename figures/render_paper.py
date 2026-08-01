@@ -12,6 +12,7 @@ facility location is aqua; the random baseline is always the neutral gray band.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -21,6 +22,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from diversity_reasoning.signals import SIGNAL_LABELS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 FIGURE_DATA = ROOT / "cache" / "figure_data"
@@ -915,7 +919,7 @@ def render_p3a() -> None:
                 [p["coverage"] for p in curve],
                 [p["accuracy"] for p in curve],
                 color=SIGNAL_COLORS[name],
-                label=name.replace("_", " "),
+                label=SIGNAL_LABELS.get(name, name),
                 linewidth=1.4,
             )
         base = next(iter(signals.values()))["base_accuracy"] if signals else None
@@ -989,11 +993,15 @@ def render_p3c() -> None:
 
 
 def render_p2g() -> None:
-    """P-2g: the share of winnable questions predicts the achievable gain.
+    """P-2g: a RETRACTED exploratory pattern, kept to document the retraction.
 
     A selector cannot lose a question whose correct answer is already modal and
-    cannot win one where it is absent. Only the present-but-not-modal group is
-    winnable, so its share should bound what any objective can deliver.
+    cannot win one where it is absent, so only the present-but-not-modal group
+    is contestable. An intermediate five-cell analysis suggested the *size* of
+    that group predicted the achievable gain (r ~ +0.75). At final scale the
+    correlation collapsed to +0.06 on pass@k and is negative for the other
+    rules; six cells cannot support a predictive law either way. The figure is
+    retained so the retraction is visible rather than silent.
     """
     payload = load("P-2g")
     if not payload or not payload.get("points"):
@@ -1039,7 +1047,7 @@ def render_p2g() -> None:
     axes[0].legend(fontsize=6, loc="upper left")
     axes[1].legend(fontsize=6, loc="upper left")
     figure.suptitle(
-        "What bounds the gain from selection: winnable share, not headroom",
+        "Retracted: at final scale, neither predictor tracks the achievable gain (n=6 cells)",
         y=1.03,
         fontsize=9,
     )
