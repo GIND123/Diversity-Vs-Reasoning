@@ -211,11 +211,12 @@ def stage_cells(cells: Sequence[Tuple[str, str]], jobs: int) -> None:
 
 
 def stage_synthetic() -> None:
-    from diversity_reasoning.measurement import e1_synthetic
+    from diversity_reasoning.measurement import e1_synthetic, effective_number_validation
 
     out = ANALYSIS / "synthetic"
     out.mkdir(parents=True, exist_ok=True)
     _write(out / "e1_synthetic.json", e1_synthetic())
+    _write(out / "effective_number.json", effective_number_validation())
 
 
 # --------------------------------------------------------------------------
@@ -643,6 +644,9 @@ def assemble_measurement() -> None:
                 for label in ("modal", "minority", "tail", "absent")
             },
         }
+    effective_path = ANALYSIS / "synthetic" / "effective_number.json"
+    if effective_path.exists():
+        _write(FIGURE_DATA / "P-0c.json", _load(effective_path))
     synthetic_path = ANALYSIS / "synthetic" / "e1_synthetic.json"
     _write(
         FIGURE_DATA / "P-1a.json",
@@ -767,6 +771,142 @@ def assemble_winnable() -> None:
                     "n": len(subset),
                 }
     _write(FIGURE_DATA / "P-2g.json", {"points": points, "correlations": correlations})
+
+
+def _common_budget_spectra(
+    spectra: List[Dict[str, Any]], kernel: str = "embedding"
+) -> Dict[str, Dict[str, Any]]:
+    """One spectrum per question, all at the *same* budget.
+
+    Taking each question's largest available budget silently compares spectra of
+    different sizes. On MATH, where unparsed chains shrink pools unevenly, the
+    per-question budget ranges 128-1024 and VS_0 becomes a perfect proxy for
+    pool size (r = 1.000), manufacturing a -0.99 "anticorrelation" with coverage
+    that is pure size confound. Every cross-question comparison therefore uses
+    the largest budget present for *all* questions in the cell.
+    """
+    rows = [row for row in spectra if row["kernel"] == kernel]
+    if not rows:
+        return {}
+    by_question: Dict[str, set] = {}
+    for row in rows:
+        by_question.setdefault(row["qid"], set()).add(row["budget"])
+    if not by_question:
+        return {}
+    # The largest budget retaining at least this share of questions. Using the
+    # strict intersection lets one unusually small pool drag every question down
+    # to its budget (a single MATH pool forced 128 on an otherwise 512 cell).
+    retention = 0.9
+    total = len(by_question)
+    candidates = sorted({b for budgets in by_question.values() for b in budgets}, reverse=True)
+    for budget in candidates:
+        kept = [qid for qid, budgets in by_question.items() if budget in budgets]
+        if len(kept) >= retention * total:
+            keep = set(kept)
+            return {
+                row["qid"]: row for row in rows if row["budget"] == budget and row["qid"] in keep
+            }
+    return {}
+
+
+def assemble_metric_correlations() -> None:
+    """P-4a: correlation between every functional and the other quantities.
+
+    Follows the presentation used for the Vendi score family in the literature
+    (Pasarkar & Dieng 2024, Fig. 5): a Pearson-correlation matrix showing how
+    each order q relates to the other measures in play. Here the companions are
+    coverage, answer entropy, the vote margin, and the downstream outcomes, so
+    the panel shows directly which orders carry information the others do not.
+    """
+    from scipy.stats import pearsonr
+
+    per_cell: Dict[str, Any] = {}
+    for model, dataset in _available_cells():
+        base = ANALYSIS / model / dataset
+        signals = _load(base / "signals.json")
+        spectra = _load(base / "spectra.json")
+        strata = {row["qid"]: row for row in _load(base / "strata.json")["questions"]}
+        # One row per question: the full-pool spectra on the embedding kernel.
+        full = _common_budget_spectra(spectra)
+        columns: Dict[str, List[float]] = {}
+        qids = [s["qid"] for s in signals if s["qid"] in full and s["qid"] in strata]
+        if len(qids) < 8:
+            continue
+        for q in ("0", "0.1", "0.5", "1", "2", "inf"):
+            columns[f"VS_{q}"] = [full[qid][f"vs_{q}"] for qid in qids]
+        columns["coverage"] = [full[qid]["pseudo_logdet"] for qid in qids]
+        by_qid = {s["qid"]: s for s in signals}
+        columns["answer entropy"] = [by_qid[qid]["answer_entropy"] for qid in qids]
+        columns["vote margin"] = [by_qid[qid]["vote_margin"] for qid in qids]
+        columns["mean logprob"] = [by_qid[qid]["mean_logprob"] for qid in qids]
+        columns["pass@1"] = [strata[qid]["pass_at_1"] for qid in qids]
+        columns["MV correct"] = [float(by_qid[qid]["mv_correct"]) for qid in qids]
+        names = list(columns)
+        matrix = []
+        for a in names:
+            row = []
+            for b in names:
+                x, y = np.asarray(columns[a]), np.asarray(columns[b])
+                row.append(
+                    float(pearsonr(x, y).statistic)
+                    if np.std(x) > 0 and np.std(y) > 0
+                    else float("nan")
+                )
+            matrix.append(row)
+        per_cell[f"{model}|{dataset}"] = {
+            "names": names,
+            "matrix": matrix,
+            "n_questions": len(qids),
+            "budget": int(next(iter(full.values()))["budget"]),
+        }
+    _write(FIGURE_DATA / "P-4a.json", per_cell)
+
+
+def assemble_quality_scatter() -> None:
+    """P-4b: each functional against downstream quality, per question.
+
+    The presentation mirrors the Vendi-score-versus-human-evaluation panels in
+    the literature (Pasarkar & Dieng 2024, Figs. 4 and 7): one scatter per
+    functional against an outcome, annotated with its correlation, so a reader
+    can see which orders actually track quality rather than only each other.
+    """
+    from scipy.stats import pearsonr
+
+    per_cell: Dict[str, Any] = {}
+    for model, dataset in _available_cells():
+        base = ANALYSIS / model / dataset
+        signals = {s["qid"]: s for s in _load(base / "signals.json")}
+        strata = {row["qid"]: row for row in _load(base / "strata.json")["questions"]}
+        spectra = _load(base / "spectra.json")
+        full = _common_budget_spectra(spectra)
+        qids = [q for q in full if q in signals and q in strata]
+        if len(qids) < 8:
+            continue
+        series: Dict[str, Any] = {}
+        outcome = np.asarray([strata[q]["pass_at_1"] for q in qids])
+        for label, values in (
+            ("VS_1", [full[q]["vs_1"] for q in qids]),
+            ("VS_inf", [full[q]["vs_inf"] for q in qids]),
+            ("coverage", [full[q]["pseudo_logdet"] for q in qids]),
+            ("answer entropy", [signals[q]["answer_entropy"] for q in qids]),
+        ):
+            array = np.asarray(values, dtype=float)
+            stat = (
+                float(pearsonr(array, outcome).statistic)
+                if np.std(array) > 0 and np.std(outcome) > 0
+                else float("nan")
+            )
+            series[label] = {
+                "x": array.tolist(),
+                "y": outcome.tolist(),
+                "pearson": stat,
+            }
+        per_cell[f"{model}|{dataset}"] = {
+            "series": series,
+            "n_questions": len(qids),
+            "budget": int(next(iter(full.values()))["budget"]),
+        }
+    _write(FIGURE_DATA / "P-4b.json", per_cell)
 
 
 def assemble_signals() -> None:
@@ -911,6 +1051,8 @@ def stage_assemble() -> None:
     assemble_measurement()
     assemble_winner_map()
     assemble_winnable()
+    assemble_metric_correlations()
+    assemble_quality_scatter()
     assemble_signals()
 
 

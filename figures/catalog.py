@@ -3,6 +3,7 @@
 FIGURE_IDS = (
     "P-0a",
     "P-0b",
+    "P-0c",
     "P-1a",
     "P-1b",
     "P-1c",
@@ -19,6 +20,8 @@ FIGURE_IDS = (
     "P-3a",
     "P-3b",
     "P-3c",
+    "P-4a",
+    "P-4b",
     "P-A3",
     "P-A4",
     "P-A4b",

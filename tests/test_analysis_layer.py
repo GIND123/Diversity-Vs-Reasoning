@@ -236,6 +236,49 @@ class TestAnisotropy:
             pool.kernel("embedding", components=1)
 
 
+class TestCommonBudgetSelection:
+    """Cross-question comparisons must fix the budget.
+
+    Taking each question's own largest budget makes VS_0 a proxy for pool size
+    (r = 1.000 measured on MATH) and manufactures a -0.99 "anticorrelation"
+    between diversity and coverage that is pure size confound.
+    """
+
+    def _rows(self, spec):
+        return [
+            {"qid": qid, "kernel": "embedding", "budget": b, "vs_1": 1.0}
+            for qid, budgets in spec.items()
+            for b in budgets
+        ]
+
+    def _select(self, spec):
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
+        loader = importlib.util.spec_from_file_location("run_analysis_mod", path)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+        return module._common_budget_spectra(self._rows(spec))
+
+    def test_all_questions_share_one_budget(self) -> None:
+        chosen = self._select({"a": [128, 512, 1024], "b": [128, 512], "c": [128, 512]})
+        assert len({row["budget"] for row in chosen.values()}) == 1
+
+    def test_one_small_pool_does_not_drag_everyone_down(self) -> None:
+        """A single 128-chain outlier must not force the whole cell to 128."""
+        spec = {f"q{i}": [128, 512, 1024] for i in range(20)}
+        spec["tiny"] = [128]
+        chosen = self._select(spec)
+        budget = next(iter(chosen.values()))["budget"]
+        assert budget == 1024
+        assert "tiny" not in chosen
+        assert len(chosen) == 20
+
+    def test_returns_empty_when_nothing_shared(self) -> None:
+        assert self._select({}) == {}
+
+
 class TestCacheRelease:
     """Per-pool caches must be droppable; retaining them across a large cell
     exceeded RAM and made a 192-question run 30x slower than a 96-question one."""

@@ -53,6 +53,57 @@ def _summary(values: Sequence[float]) -> Dict[str, float]:
 # --------------------------------------------------------------------------
 
 
+def effective_number_validation(
+    *,
+    max_classes: int = 12,
+    replicates: int = 20,
+    seed: int = 0,
+) -> Dict[str, Any]:
+    """Axiom 1 check: N equally-abundant dissimilar classes must score exactly N.
+
+    The effective-number axiom is what makes a Vendi score interpretable, and it
+    is the property our question-centring fix restores on real pools. Verifying
+    it on synthetic pools with known ground truth — balanced classes, then
+    increasingly imbalanced ones — shows both that the implementation is exact
+    and how each order q degrades as balance is lost, which is the distinction
+    the order-q family exists to express.
+    """
+    generator = np.random.default_rng(seed)
+    balanced: List[Dict[str, Any]] = []
+    for n_classes in range(1, max_classes + 1):
+        values = functionals_from_counts([8] * n_classes)
+        balanced.append(
+            {
+                "n_classes": n_classes,
+                **{key: values[key] for key in FUNCTIONAL_KEYS},
+            }
+        )
+    # Imbalance sweep: one dominant class holding a growing share of the mass.
+    imbalanced: List[Dict[str, Any]] = []
+    n_classes = 6
+    for dominance in (1 / 6, 0.25, 0.4, 0.55, 0.7, 0.85, 0.95):
+        samples: Dict[str, List[float]] = {key: [] for key in FUNCTIONAL_KEYS}
+        rest = (1.0 - dominance) / (n_classes - 1)
+        probabilities = np.array([dominance] + [rest] * (n_classes - 1))
+        for _ in range(replicates):
+            counts = generator.multinomial(600, probabilities)
+            values = functionals_from_counts([int(c) for c in counts if c > 0])
+            for key in FUNCTIONAL_KEYS:
+                samples[key].append(values[key])
+        imbalanced.append(
+            {
+                "dominance": float(dominance),
+                **{key: _summary(samples[key]) for key in FUNCTIONAL_KEYS},
+            }
+        )
+    return {
+        "balanced": balanced,
+        "imbalanced": imbalanced,
+        "n_classes_imbalanced": n_classes,
+        "replicates": replicates,
+    }
+
+
 def e1_synthetic(
     *,
     n_classes: int = 6,

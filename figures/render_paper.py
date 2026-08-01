@@ -209,6 +209,75 @@ def _plot_functional_curves(
     ax.set_xlabel(x_label)
 
 
+def render_p0c() -> None:
+    """P-0c: the effective-number axiom, on synthetic pools with known truth.
+
+    Left: N balanced dissimilar classes must score exactly N for every order q
+    — the property that makes a Vendi score interpretable as an effective
+    number, and the one the raw embedding kernel violated on real pools.
+    Right: as one class takes over, the orders separate exactly as intended,
+    low q holding near the class count and high q tracking the dominant mass.
+    """
+    payload = load("P-0c")
+    if not payload:
+        return
+    figure, axes = plt.subplots(1, 2, figsize=(7.2, 2.9))
+    balanced = payload["balanced"]
+    counts = [row["n_classes"] for row in balanced]
+    axes[0].plot(
+        counts, counts, linestyle="--", color=NEUTRAL, linewidth=1.0, label="ground truth (= N)"
+    )
+    for q in Q_ORDER:
+        style = functional_style(f"vs_{q}")
+        axes[0].plot(
+            counts,
+            [row[f"vs_{q}"] for row in balanced],
+            marker=style["marker"],
+            markersize=3.5,
+            color=style["color"],
+            label=style["label"],
+            alpha=0.9,
+        )
+    axes[0].set_xlabel("number of balanced dissimilar classes $N$")
+    axes[0].set_ylabel("VS$_q$")
+    axes[0].set_title("Every order recovers $N$ exactly", fontsize=8.5)
+    axes[0].legend(fontsize=6, ncol=2)
+
+    imbalanced = payload["imbalanced"]
+    dominance = [row["dominance"] for row in imbalanced]
+    n_classes = payload["n_classes_imbalanced"]
+    axes[1].axhline(
+        n_classes, linestyle="--", color=NEUTRAL, linewidth=1.0, label=f"class count ({n_classes})"
+    )
+    for q in Q_ORDER:
+        style = functional_style(f"vs_{q}")
+        means = [row[f"vs_{q}"]["mean"] for row in imbalanced]
+        axes[1].plot(
+            dominance,
+            means,
+            marker=style["marker"],
+            markersize=3.5,
+            color=style["color"],
+            label=style["label"],
+        )
+        axes[1].fill_between(
+            dominance,
+            [row[f"vs_{q}"]["low"] for row in imbalanced],
+            [row[f"vs_{q}"]["high"] for row in imbalanced],
+            color=style["color"],
+            alpha=0.13,
+            linewidth=0,
+        )
+    axes[1].set_xlabel("share of mass held by the dominant class")
+    axes[1].set_ylabel("VS$_q$")
+    axes[1].set_title("Orders separate under imbalance", fontsize=8.5)
+    axes[1].legend(fontsize=6, ncol=2)
+    figure.suptitle(
+        "Effective-number axiom on synthetic pools with known ground truth", y=1.03, fontsize=9
+    )
+    save(figure, "P-0c")
+
+
 def render_p1a() -> None:
     payload = load("P-1a")
     if not payload or not payload.get("synthetic"):
@@ -977,6 +1046,101 @@ def render_p2g() -> None:
     save(figure, "P-2g")
 
 
+DIVERGING = LinearSegmentedColormap.from_list(
+    "ref-diverging",
+    ["#0d366b", "#2a78d6", "#86b6ef", "#f0efec", "#f2a682", "#eb6834", "#8f3410"],
+)
+
+
+def render_p4a() -> None:
+    """P-4a: correlation matrix over the functionals and companion measures.
+
+    Presentation follows the convention used for the Vendi family in the
+    literature (Pasarkar & Dieng 2024, Fig. 5). Diverging palette on a neutral
+    midpoint so sign reads at a glance; blue is positive, orange negative.
+    """
+    payload = load("P-4a")
+    if not payload:
+        return
+    cells = [c for c in payload if payload[c].get("matrix")]
+    if not cells:
+        return
+    show = cells[:2]
+    figure, axes = plt.subplots(1, len(show), figsize=(5.4 * len(show), 4.6), squeeze=False)
+    for ax, cell in zip(axes[0], show):
+        data = payload[cell]
+        matrix = np.asarray(data["matrix"], dtype=float)
+        names = data["names"]
+        image = ax.imshow(matrix, cmap=DIVERGING, vmin=-1, vmax=1, aspect="auto")
+        ax.set_xticks(range(len(names)), names, rotation=45, ha="right", fontsize=6)
+        ax.set_yticks(range(len(names)), names, fontsize=6)
+        ax.grid(False)
+        for i in range(len(names)):
+            for j in range(len(names)):
+                if np.isfinite(matrix[i, j]):
+                    ax.text(
+                        j,
+                        i,
+                        f"{matrix[i, j]:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=4.6,
+                        color="white" if abs(matrix[i, j]) > 0.55 else "#0b0b0b",
+                    )
+        ax.set_title(f"{cell_label(cell)}  (n={data['n_questions']})", fontsize=8)
+        figure.colorbar(image, ax=ax, shrink=0.8, label="Pearson r")
+    figure.suptitle(
+        "Correlations among the diversity orders, coverage, and outcome measures",
+        y=1.02,
+        fontsize=9,
+    )
+    save(figure, "P-4a")
+
+
+def render_p4b() -> None:
+    """P-4b: each functional against downstream question difficulty.
+
+    Mirrors the Vendi-score-versus-external-evaluation panels in the literature
+    (Pasarkar & Dieng 2024, Figs. 4 and 7): one scatter per functional with its
+    correlation annotated.
+    """
+    payload = load("P-4b")
+    if not payload:
+        return
+    cell = next((c for c in payload if c.startswith(HEADLINE_MODEL)), None) or next(
+        iter(payload), None
+    )
+    if cell is None:
+        return
+    series = payload[cell]["series"]
+    labels = [k for k in ("VS_1", "VS_inf", "coverage", "answer entropy") if k in series]
+    figure, axes = plt.subplots(1, len(labels), figsize=(2.7 * len(labels), 2.7))
+    axes = np.atleast_1d(axes)
+    colours = {
+        "VS_1": Q_COLORS["1"],
+        "VS_inf": Q_COLORS["inf"],
+        "coverage": COVERAGE,
+        "answer entropy": "#4a3aa7",
+    }
+    for ax, label in zip(axes, labels):
+        data = series[label]
+        ax.scatter(
+            data["x"], data["y"], s=11, alpha=0.65, linewidths=0, color=colours.get(label, NEUTRAL)
+        )
+        ax.set_xlabel(label)
+        stat = data.get("pearson")
+        title = f"r = {stat:+.2f}" if stat is not None and np.isfinite(stat) else "r = n/a"
+        ax.set_title(title, fontsize=8)
+    axes[0].set_ylabel("pass@1 (full 1024-chain pool)")
+    figure.suptitle(
+        f"Do the functionals track question difficulty? — {cell_label(cell)} "
+        f"(n={payload[cell]['n_questions']})",
+        y=1.04,
+        fontsize=8.5,
+    )
+    save(figure, "P-4b")
+
+
 def render_pa4() -> None:
     """P-A4: the embedding kernel's concentration is question-specific.
 
@@ -1164,6 +1328,7 @@ def write_tables() -> None:
 
 def main() -> int:
     render_p0()
+    render_p0c()
     render_p1a()
     render_p1b()
     render_p1c()
@@ -1182,6 +1347,8 @@ def main() -> int:
     render_p3a()
     render_p3b()
     render_p3c()
+    render_p4a()
+    render_p4b()
     render_pa3()
     render_pa4()
     write_tables()
