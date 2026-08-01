@@ -86,9 +86,7 @@ def test_t12_question_centred_kernel_is_valid() -> None:
 def test_t12_mixed_kernel_is_valid(alpha: float) -> None:
     """A convex combination of two valid kernels must remain valid."""
     pool = make_pool()
-    kernel = mixed_kernel(
-        pool.kernel("answer"), pool.kernel("embedding_qc", components=1), alpha
-    )
+    kernel = mixed_kernel(pool.kernel("answer"), pool.kernel("embedding_qc", components=1), alpha)
     assert_valid_kernel(kernel, f"K_alpha={alpha}")
 
 

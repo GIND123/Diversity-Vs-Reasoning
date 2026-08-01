@@ -122,29 +122,43 @@ even after correction.
   <img src="assets/P-2a.png" width="92%" alt="Accuracy vs selection budget for each objective against the random band">
 </p>
 
-## (a) and (b) When does diversity help, when does coverage, and under which rule?
+## (a) and (b) When does diversity win, when does coverage, and under which rule?
 
-| regime | winner | effect |
-|---|---|---|
-| pass@k, weak models | **diversity** (VS₂, VS_∞) | +0.033 (Holm *p* = 0.028); +0.020 |
-| pass@k, **tail-heavy** questions | **coverage** | +0.068, CI [+0.014, +0.121] |
-| majority vote, MATH on a weak model | **coverage** | +0.034 |
-| majority vote, modal questions | facility location | +0.060 |
-| anything on the strongest model | **nothing beats random** | all CIs contain zero |
+**The variability space decides whether the two differ at all.** On the
+question-centred *embedding* kernel they are statistically indistinguishable in
+the large majority of conditions (152 of 162 ties). On the *answer* kernel they
+separate sharply — and the aggregation rule picks the winner, with no exceptions
+across six model×dataset cells:
 
-Diversity orders tend to win **pass@k** — you want to *hit* the answer, so
-spreading out pays. Coverage does better where the correct answer is **rare**,
-which is where reaching it requires volume rather than representativeness.
+| aggregation rule | winner | mean (diversity − coverage) | vs random: diversity | vs random: coverage | cells agreeing |
+|---|---|---:|---:|---:|---|
+| **pass@k** | **diversity** | **+0.163** | +0.032 | −0.131 | **6/6** |
+| **majority vote** | **coverage** | −0.166 | −0.186 | −0.020 | **6/6** |
+| **verifier best-of-n** | **coverage** | −0.213 | −0.167 | +0.046 | **6/6** |
 
-<p align="center">
-  <img src="assets/P-2f.png" width="80%" alt="q-inertness on the answer kernel">
-</p>
+Each verdict is the **paired per-question difference** between the diversity arm
+(VS₁) and the coverage arm — comparing each to random separately cannot say
+which is better, since both can beat random while being indistinguishable from
+one another.
 
-**On the answer kernel the order q is inert.** At budgets at or below the number
-of distinct answers, every order selects identically — Theorem 4.1 of
-[Cousins][cousins] made visible. The graded family remains the right measurement
-lens for RQ1, but on answer-space selection its reasoning effect collapses to
-the choice of aggregation rule.
+**The mechanism is exact, not statistical.** On a block kernel, greedy VS_q
+picks one chain per distinct answer. The pseudo log-determinant is maximised by
+picking a *single* class repeatedly: at budget 4, composition `[4]` scores
+**0.000**, `[2,2]` scores −1.386, `[1,1,1,1]` scores −5.545. Excluding zero
+eigenvalues makes exact duplicates free, so concentrating mass maximises it.
+Spreading helps you *hit* an answer (pass@k); concentrating helps you form a
+confident mode (voting, verifier).
+
+> **A framing correction this exposes.** Selecting "one chain per distinct
+> answer" maximises **richness, VS₀** — the q → 0 member of the *diversity*
+> family, not coverage. The pseudo log-determinant does the opposite.
+> Attributing a pass@k gain on minority-answer questions to *coverage* assigns a
+> diversity effect to the wrong functional.
+
+**Winning the head-to-head is not the same as being useful.** Against random,
+diversity gains on pass@k (+0.032) while coverage does not reliably beat random
+on majority vote (−0.020). The head-to-head says which measure to prefer for a
+given rule; the vs-random columns say whether either is worth using at all.
 
 ## (c) How does it depend on tail-heaviness?
 

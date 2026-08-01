@@ -353,7 +353,51 @@ renormalisation; VS_q values are.** This also explains why coverage is the more
 threshold-fragile of the two (see the τ sensitivity appendix): both issues come
 from the same place, its dependence on the near-null part of the spectrum.
 
-### 7.2 The winner map
+### 7.2 The headline: diversity vs coverage, head to head
+
+Comparing each arm to *random* cannot answer "which is better" — both can beat
+random while being indistinguishable from each other. The right test is the
+**paired per-question difference between them**.
+
+**The variability space decides whether they differ at all.** On the
+question-centred embedding kernel they are statistically indistinguishable in
+152 of 162 conditions. On the answer kernel they separate sharply:
+
+| aggregation rule | winner | mean (div − cov) | div vs random | cov vs random | cells |
+|---|---|---|---|---|---|
+| pass@k | **diversity** | +0.163 | +0.032 | −0.131 | 6/6 |
+| majority vote | **coverage** | −0.166 | −0.186 | −0.020 | 6/6 |
+| verifier best-of-n | **coverage** | −0.213 | −0.167 | +0.046 | 6/6 |
+
+Perfect sign agreement across all six model×dataset cells.
+
+**The mechanism is exact.** On a block kernel greedy VS_q picks one chain per
+distinct answer. The pseudo log-determinant is maximised by picking a *single*
+class repeatedly, because excluding zero eigenvalues makes duplicates free:
+
+| composition at k = 4 | pseudo log-det | VS_0 | VS_1 |
+|---|---|---|---|
+| `[4]` all one answer | **0.000 (max)** | 1 | 1.00 |
+| `[2,2]` | −1.386 | 2 | 2.00 |
+| `[1,1,1,1]` one per answer | −5.545 | 4 | 4.00 |
+
+Spreading helps you *hit* an answer; concentrating helps you form a confident
+mode. That is the whole result in one sentence.
+
+**The framing correction this produces.** "One chain per distinct answer" is
+**maximising richness, VS_0** — the q → 0 member of the *diversity* family. It
+is not coverage; the pseudo log-determinant does the exact opposite. Any earlier
+result attributing the pass@k gain on minority-answer questions to *coverage*
+was attributing a **diversity** effect to the wrong functional. This is the
+concrete consequence of "low q is still diversity, not coverage": the two
+objectives are not merely different in name, they select *opposite* sets.
+
+**Caution.** Winning head-to-head is not the same as being useful. Diversity
+gains over random on pass@k (+0.032), but coverage does *not* reliably beat
+random on majority vote (−0.020). The head-to-head says which measure to prefer
+for a given rule; the vs-random columns say whether either is worth using.
+
+### 7.3 The winner map
 
 At k = 8 on the question-centred kernel, across 6 cells:
 
@@ -373,7 +417,7 @@ you need volume to reach it). This is the qualitative separation the study was
 built to find — but the effects are small (2–7 points) and mostly not
 Holm-significant on their own.
 
-### 7.3 What bounds how much any selector can gain
+### 7.4 What bounds how much any selector can gain
 
 Effects vanish on Llama, which at first looked like "stronger models don't
 benefit". That explanation was **incomplete** — Llama/MATH has plenty of
@@ -395,14 +439,14 @@ Headroom overcounts, because absent questions inflate it while offering nothing
 to win. This is descriptive across 6 cells, not an estimated law — but the
 partition was fixed in advance, so it is not data dredging.
 
-### 7.4 q-inertness on the answer kernel
+### 7.5 q-inertness on the answer kernel
 
 On K_ans, at budgets at or below the number of distinct answers, **every order q
 selects identically**. This is Theorem 4.1 made visible: the spectrum is the
 answer-prevalence vector, and picking one chain per answer class maximises every
 order simultaneously. Useful as a sanity check that the implementation is right.
 
-### 7.5 VS_0 is unusable on continuous kernels
+### 7.6 VS_0 is unusable on continuous kernels
 
 Three independent lines of evidence, all agreeing:
 
@@ -417,7 +461,7 @@ Three independent lines of evidence, all agreeing:
 
 It remains meaningful on K_ans, where exact ties make the count informative.
 
-### 7.6 Robustness
+### 7.7 Robustness
 
 | check | result |
 |---|---|

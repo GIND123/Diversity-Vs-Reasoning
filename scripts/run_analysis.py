@@ -909,6 +909,121 @@ def assemble_quality_scatter() -> None:
     _write(FIGURE_DATA / "P-4b.json", per_cell)
 
 
+def assemble_head_to_head() -> None:
+    """TB-9: diversity versus coverage, head to head, for every condition.
+
+    The study's question is which of the two measures of variability is the
+    better selection objective, condition by condition. Comparing each against
+    random separately cannot answer that: two arms can both beat random while
+    being indistinguishable from one another. The verdict here comes from the
+    *paired* per-question difference between the diversity arm and the coverage
+    arm, bootstrapped, which is the quantity the question is actually about.
+
+    Run on both variability spaces. On the answer kernel the two objectives do
+    provably different things: greedy VS_q picks one chain per distinct answer,
+    while the pseudo log-determinant is maximised by picking a *single* answer
+    class repeatedly (log 1 = 0 beats every spread-out composition), because
+    excluding zero eigenvalues makes duplicates free.
+
+    The diversity arm is VS_1, the canonical Vendi Score. The best-performing
+    order is reported alongside, flagged, since choosing an order after seeing
+    outcomes inflates its apparent advantage.
+    """
+    from diversity_reasoning.winner import delta_versus_random
+
+    rows: List[Dict[str, Any]] = []
+    for kernel_label, kernel_spec in (("embedding", EMB), ("answer", "answer")):
+        for model, dataset in _available_cells():
+            path = ANALYSIS / model / dataset / "outcomes_pool40.json"
+            outcomes = _normalize_outcomes(_load(path))
+            strata = _strata_lookup(model, dataset)
+            groups: Dict[str, Optional[set]] = {"all": None}
+            for row in strata.values():
+                groups.setdefault(f"tail:{row['tail']}", set()).add(row["qid"])
+                groups.setdefault(f"snell:{row['snell_tercile']}", set()).add(row["qid"])
+                if row.get("math_level"):
+                    groups.setdefault(f"level:{row['math_level']}", set()).add(row["qid"])
+
+            for rule in RULES:
+                for group, qid_filter in sorted(groups.items(), key=lambda kv: kv[0]):
+                    aligned = _aligned_arms(outcomes, rule, qid_filter, kernel=kernel_spec)
+                    if aligned is None:
+                        continue
+                    qids, arms = aligned
+                    if len(qids) < 8:
+                        continue
+                    coverage = arms["coverage"]
+                    diversity = arms["vendi_1"]
+                    random_arm = arms["random"]
+
+                    paired = delta_versus_random(diversity, coverage)
+                    orders = [q for q in arms if q.startswith("vendi_") and q != "vendi_0"]
+                    best_q = max(orders, key=lambda q: float(np.mean(arms[q])))
+                    if paired["practically_null"]:
+                        verdict = "tie (practically null)"
+                    elif paired["ci_low"] > 0:
+                        verdict = "diversity"
+                    elif paired["ci_high"] < 0:
+                        verdict = "coverage"
+                    else:
+                        verdict = "tie"
+
+                    rows.append(
+                        {
+                            "kernel": kernel_label,
+                            "model": model,
+                            "dataset": dataset,
+                            "rule": rule,
+                            "group": group,
+                            "n": len(qids),
+                            "diversity_acc": float(np.mean(diversity)),
+                            "coverage_acc": float(np.mean(coverage)),
+                            "random_acc": float(np.mean(random_arm)),
+                            "diversity_minus_coverage": paired["delta"],
+                            "ci_low": paired["ci_low"],
+                            "ci_high": paired["ci_high"],
+                            "p": paired["p"],
+                            "verdict": verdict,
+                            "diversity_vs_random": float(np.mean(diversity) - np.mean(random_arm)),
+                            "coverage_vs_random": float(np.mean(coverage) - np.mean(random_arm)),
+                            "best_order": best_q,
+                            "best_order_acc": float(np.mean(arms[best_q])),
+                        }
+                    )
+    _write(TABLES / "tb9_head_to_head.json", rows)
+    _write(FIGURE_DATA / "P-5a.json", rows)
+
+
+def _aligned_arms(
+    outcomes: List[Dict[str, Any]],
+    rule: str,
+    qid_filter: Optional[set],
+    budget: int = HEADLINE_BUDGET,
+    kernel: str = EMB,
+) -> Optional[Tuple[List[str], Dict[str, Any]]]:
+    """Per-question outcomes for every arm, on exactly the same question set."""
+    from diversity_reasoning.winner import accuracy_matrix, objective_names, random_matrix
+
+    series: Dict[str, Dict[str, float]] = {}
+    for objective in objective_names():
+        qids, values = accuracy_matrix(outcomes, f"{kernel}|{objective}", budget, rule)
+        if not qids:
+            return None
+        series[objective] = dict(zip(qids, values.tolist()))
+    qids_r, random_mean, _ = random_matrix(outcomes, budget, rule)
+    series["random"] = dict(zip(qids_r, random_mean.tolist()))
+
+    shared = set.intersection(*(set(v) for v in series.values()))
+    if qid_filter is not None:
+        shared &= qid_filter
+    ordered = sorted(shared)
+    if not ordered:
+        return None
+    return ordered, {
+        name: np.asarray([values[q] for q in ordered]) for name, values in series.items()
+    }
+
+
 def assemble_signals() -> None:
     from diversity_reasoning.signals import r6_signal_shootout, r7_escalation
 
@@ -1101,6 +1216,7 @@ def stage_assemble() -> None:
     assemble_measurement()
     assemble_winner_map()
     assemble_winnable()
+    assemble_head_to_head()
     assemble_metric_correlations()
     assemble_quality_scatter()
     assemble_signals()
@@ -1117,8 +1233,15 @@ def main() -> int:
     parser.add_argument(
         "stage",
         choices=[
-            "pull", "cell", "cells", "synthetic", "assemble",
-            "encoders", "encsweep", "seedvar", "all",
+            "pull",
+            "cell",
+            "cells",
+            "synthetic",
+            "assemble",
+            "encoders",
+            "encsweep",
+            "seedvar",
+            "all",
         ],
     )
     parser.add_argument("--model")

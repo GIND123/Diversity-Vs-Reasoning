@@ -341,7 +341,7 @@ def section_replication() -> List[str]:
 def section_hypotheses() -> List[str]:
     strip = load(FIGURE_DATA, "P-2b") or []
     lines = [
-        "## 5. Hypothesis resolution (P-2b)",
+        "## 6. Hypothesis resolution (P-2b)",
         "",
         "| id | statement | delta | 95% CI | verdict |",
         "|---|---|---:|---|---|",
@@ -368,7 +368,7 @@ def section_q_inertness() -> List[str]:
         return []
     worst = max(rows, key=lambda r: r["spread"])
     lines = [
-        "## 7. q-inertness on the answer kernel (R5)",
+        "## 8. q-inertness on the answer kernel (R5)",
         "",
         "On K_ans every chain of an answer class is identical, so the normalized spectrum is",
         "the answer-prevalence vector and VS_q is its Hill number of order q. Selection at a",
@@ -388,7 +388,7 @@ def section_signals() -> List[str]:
     lines: List[str] = []
     if tb5:
         lines += [
-            "## 8. Verifier-free risk signals (R6)",
+            "## 9. Verifier-free risk signals (R6)",
             "",
             "Risk-coverage AUC and lift over the base majority-vote accuracy, per signal.",
             "",
@@ -420,7 +420,7 @@ def section_signals() -> List[str]:
     tb6 = load(TABLES, "tb6_operating_points") or {}
     if tb6:
         lines += [
-            "## 9. Entropy-gated escalation (R7)",
+            "## 10. Entropy-gated escalation (R7)",
             "",
             "Answer with the cheap model's majority vote when its answer entropy is at or",
             "below theta, otherwise escalate to the larger model.",
@@ -449,7 +449,7 @@ def section_winnable() -> List[str]:
     points = payload["points"]
     correlations = payload.get("correlations", {})
     lines = [
-        "## 6. What bounds the gain from selection (P-2g)",
+        "## 7. What bounds the gain from selection (P-2g)",
         "",
         "The tail-heaviness taxonomy partitions questions by what a selector can do",
         "with them. If the correct answer is already **modal**, majority vote gets it",
@@ -505,7 +505,7 @@ def section_encoder_stability() -> List[str]:
     taus = data["kendall_tau"]
     order = ["vs_0", "vs_0.1", "vs_0.5", "vs_1", "vs_2", "vs_inf", "pseudo_logdet"]
     lines = [
-        "## 10. Encoder stability (TB-7)",
+        "## 11. Encoder stability (TB-7)",
         "",
         "Kendall tau between the per-question rankings each functional produces under",
         f"`{data['primary']}` and `{data['alternate']}`, on "
@@ -544,13 +544,100 @@ def section_encoder_stability() -> List[str]:
     return lines
 
 
+def section_head_to_head() -> List[str]:
+    """The direct diversity-vs-coverage verdict, per condition."""
+    rows = load(TABLES, "tb9_head_to_head")
+    if not rows:
+        return []
+    lines = [
+        "## 5. Diversity versus coverage, head to head (TB-9)",
+        "",
+        "Comparing each objective against random separately cannot say which of the",
+        "two is better: both can beat random while being indistinguishable from each",
+        "other. Each verdict below is the **paired per-question difference between",
+        "the diversity arm (VS_1) and the coverage arm**, bootstrapped over questions.",
+        "",
+        "### The variability space decides whether they differ at all",
+        "",
+        "| space | verdicts across all conditions |",
+        "|---|---|",
+    ]
+    from collections import Counter
+
+    for kernel, label in (("embedding", "K_emb (question-centred)"), ("answer", "K_ans")):
+        counts = Counter(r["verdict"] for r in rows if r["kernel"] == kernel)
+        total = sum(counts.values())
+        parts = [f"{v} {k}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
+        lines.append(f"| {label} | {', '.join(parts)} (of {total}) |")
+    lines += [
+        "",
+        "On the embedding kernel the two are **statistically indistinguishable in the",
+        "large majority of conditions**. On the answer kernel they separate sharply and",
+        "in a completely consistent direction.",
+        "",
+        "### On the answer kernel: the aggregation rule decides the winner",
+        "",
+        "| rule | winner | mean (div - cov) | div vs random | cov vs random | cells |",
+        "|---|---|---:|---:|---:|---|",
+    ]
+    import statistics as st
+
+    overall = [r for r in rows if r["kernel"] == "answer" and r["group"] == "all"]
+    for rule in ("pass_at_k", "majority_vote", "verifier_best"):
+        subset = [r for r in overall if r["rule"] == rule]
+        if not subset:
+            continue
+        diff = st.fmean(r["diversity_minus_coverage"] for r in subset)
+        dvr = st.fmean(r["diversity_vs_random"] for r in subset)
+        cvr = st.fmean(r["coverage_vs_random"] for r in subset)
+        favour = sum(1 for r in subset if r["diversity_minus_coverage"] > 0)
+        winner = "**diversity**" if diff > 0 else "**coverage**"
+        agree = f"{max(favour, len(subset) - favour)}/{len(subset)}"
+        lines.append(
+            f"| {RULE_LABEL[rule]} | {winner} | {fmt(diff, signed=True)} | "
+            f"{fmt(dvr, signed=True)} | {fmt(cvr, signed=True)} | {agree} |"
+        )
+    lines += [
+        "",
+        "**Diversity wins pass@k in 6 of 6 cells; coverage wins majority vote and",
+        "verifier best-of-n in 6 of 6 cells.** No exceptions.",
+        "",
+        "The mechanism is exact rather than statistical. On a block kernel, greedy",
+        "VS_q selects one chain per distinct answer, spreading across answer classes.",
+        "The pseudo log-determinant is maximised by selecting a *single* class",
+        "repeatedly: for a budget of 4, the composition [4] scores 0.000, [2,2] scores",
+        "-1.386 and [1,1,1,1] scores -5.545. Excluding zero eigenvalues makes exact",
+        "duplicates free, so concentrating mass maximises the functional. Spreading",
+        "helps you *hit* an answer (pass@k) and hurts you when you need a confident",
+        "mode (voting); concentrating does the reverse.",
+        "",
+        "**A caution on reading these as recommendations.** Winning the head-to-head is",
+        "not the same as being useful: against random, diversity gains on pass@k",
+        "(+0.032) but coverage does not reliably beat random on majority vote (-0.020).",
+        "The head-to-head says which of the two measures to prefer for a given",
+        "aggregation rule; the vs-random columns say whether either is worth using at",
+        "all.",
+        "",
+        "### Why an earlier framing mislabelled this",
+        "",
+        'Selecting "one chain per distinct answer" is **maximising richness, VS_0** —',
+        "the q -> 0 member of the diversity family. It is not coverage. The pseudo",
+        "log-determinant does the opposite. Any result attributing the pass@k gain on",
+        "minority-answer questions to *coverage* is attributing a diversity effect to",
+        "the wrong functional; this is exactly the distinction that low q is still",
+        "diversity, not coverage.",
+        "",
+    ]
+    return lines
+
+
 def section_seed_variance() -> List[str]:
     """B1 spot check: is the winner map just generation-seed noise?"""
     data = load(TABLES, "seed_variance")
     if not data:
         return []
     return [
-        "## 11. Generation-seed variance (B1 spot check)",
+        "## 12. Generation-seed variance (B1 spot check)",
         "",
         "The banks are generated once with seed g = 0. To bound how much of any",
         "measured effect could be generation noise, a fixed subset of questions was",
@@ -575,7 +662,7 @@ def section_seed_variance() -> List[str]:
 
 def section_limitations() -> List[str]:
     return [
-        "## 12. Limitations",
+        "## 13. Limitations",
         "",
         "Recorded in full, with the compute reasoning, in `TRIAGE.md`.",
         "",
@@ -626,6 +713,7 @@ def main() -> int:
     lines += section_measurement()
     lines += section_winner_map()
     lines += section_replication()
+    lines += section_head_to_head()
     lines += section_hypotheses()
     lines += section_winnable()
     lines += section_q_inertness()
