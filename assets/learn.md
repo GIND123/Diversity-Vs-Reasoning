@@ -274,7 +274,17 @@ other in solving this problem*, which is what "diversity of reasoning" means.
 | **question-centred** | **0.514** | **9.29** | **0.060** |
 
 Replicated on **3 models, 2 model families, 2 datasets** with nearly identical
-numbers (raw top-eig 0.94–0.95 → 0.513–0.514 everywhere).
+numbers, and — more importantly — across **five encoder families**:
+
+| | raw kernel | question-centred |
+|---|---|---|
+| top-eigenvalue share | 0.922 – 0.975 | **0.512 – 0.515** |
+| mean VS_1 | 1.20 – 1.67 | **8.35 – 9.90** |
+
+BGE, MXBAI, E5, GTE and MPNet all put at least 92% of the spectral mass in one
+eigenvalue on the raw kernel. Since `VS_q` is a functional *of a kernel*, this is
+the check that matters: the near-rank-1 kernel is a property of same-question
+chain pools, not of any one embedding model.
 
 **Why this is a contribution, not just bookkeeping.** Anyone applying the Vendi
 Score to "diversity of model outputs for one prompt" — reasoning chains, RAG

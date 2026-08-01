@@ -76,6 +76,7 @@ review). Tables are emitted as Markdown alongside the figures.
 | **P-A3** | τ threshold sensitivity for coverage: mean, median, and worst change, plus rank stability, at τ ∈ {1e-8, 1e-12} against the 1e-10 default |
 | **P-A4** | **Why the embedding kernel is question-centred.** Spectral concentration, effective modes, and rate of identical selections across the raw, corpus-corrected, and question-centred kernels |
 | **P-A4b** | Effect sizes under each kernel-correction arm |
+| **P-A5** | **The kernel diagnosis across five encoder families** (BGE, MXBAI, E5, GTE, MPNet) — raw top-eigenvalue share 0.922–0.975 everywhere, collapsing to 0.512–0.515 after question-centring |
 
 ## Tables
 
@@ -90,6 +91,7 @@ review). Tables are emitted as Markdown alongside the figures.
 | TB-6 | Escalation operating points at 90 / 95 / 99% answered-set accuracy |
 | TB-7 | Encoder rank stability (bge-large vs mxbai), per functional |
 | TB-8 | Generation-seed variance across g ∈ {0, 1, 2} |
+| **TB-9** | **Diversity vs coverage head to head** — paired per-question difference, per model, dataset, rule, hardness tercile, MATH level and tail stratum, on both variability spaces |
 
 ## Two conventions that matter for correctness
 

@@ -25,6 +25,7 @@ FIGURE_IDS = (
     "P-A3",
     "P-A4",
     "P-A4b",
+    "P-A5",
 )
 
 TABLE_IDS = ("TB-0", "TB-1", "TB-2", "TB-3", "TB-4", "TB-5", "TB-6", "TB-7")

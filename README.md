@@ -105,6 +105,17 @@ Re-expressing chains as deviations from **their own question's centroid**
 restores VS₁ ≈ 9.3 and drops identical selection to 0.06. Replicated on 3
 models, 2 model families, 2 datasets.
 
+<p align="center">
+  <img src="assets/P-A5.png" width="88%" alt="The near-rank-1 kernel across five encoder families">
+</p>
+
+**It is not an artifact of one encoder.** Repeating the diagnosis on the same
+chains under five encoder families — BGE, MXBAI, E5, GTE, MPNet — gives the raw
+top-eigenvalue share in **0.922–0.975** and raw VS₁ in **1.20–1.67** every time,
+collapsing to **0.512–0.515** and **8.35–9.90** after question-centring. The
+near-rank-1 kernel is a property of same-question chain pools, not of any
+embedding model.
+
 This is consistent with the earlier observation that text embeddings are nearly
 blind to final answers: the same-vs-different answer cosine gap is only ≈ +0.02
 even after correction.

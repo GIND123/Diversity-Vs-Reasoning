@@ -1229,6 +1229,48 @@ def _render_pa4_effects(entry: Dict[str, Any], cell: str) -> None:
     save(figure, "P-A4b")
 
 
+def render_pa5() -> None:
+    """P-A5: the kernel diagnosis across encoder families.
+
+    The Vendi score is a functional of a similarity kernel, so a finding about
+    the kernel could be a finding about one encoder. Repeating the diagnosis on
+    the same chains under five encoder families settles that.
+    """
+    payload = load("P-A5")
+    if not payload or not payload.get("rows"):
+        return
+    rows = payload["rows"]
+    encoders = sorted({r["encoder"] for r in rows})
+    figure, axes = plt.subplots(1, 2, figsize=(8.2, 3.0))
+    width = 0.8 / max(1, len(encoders))
+    arms = ["corpus c=0", "question-centred"]
+    positions = np.arange(len(arms))
+    for index, encoder in enumerate(encoders):
+        offset = (index - (len(encoders) - 1) / 2) * width
+        shares, vs1 = [], []
+        for arm in arms:
+            subset = [r for r in rows if r["encoder"] == encoder and r["arm"] == arm]
+            shares.append(
+                float(np.mean([r["top_eigenvalue_share"] for r in subset])) if subset else np.nan
+            )
+            vs1.append(float(np.mean([r["mean_vs_1"] for r in subset])) if subset else np.nan)
+        colour = plt.get_cmap("tab10")(index % 10)
+        axes[0].bar(positions + offset, shares, width=width * 0.9, color=colour, label=encoder)
+        axes[1].bar(positions + offset, vs1, width=width * 0.9, color=colour)
+    axes[0].set_ylabel("top eigenvalue share of spectrum")
+    axes[0].set_ylim(0, 1)
+    axes[1].set_ylabel("mean VS$_1$ (effective modes)")
+    for ax in axes:
+        ax.set_xticks(positions, ["raw kernel", "question-centred"], fontsize=8)
+    axes[0].legend(fontsize=6, ncol=2)
+    figure.suptitle(
+        "The near-rank-1 kernel is a property of same-question pools, not of one encoder",
+        y=1.04,
+        fontsize=9,
+    )
+    save(figure, "P-A5")
+
+
 def render_pa3() -> None:
     payload = load("P-A3")
     if not payload:
@@ -1351,6 +1393,7 @@ def main() -> int:
     render_p4b()
     render_pa3()
     render_pa4()
+    render_pa5()
     write_tables()
     return 0
 
