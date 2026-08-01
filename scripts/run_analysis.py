@@ -1027,6 +1027,56 @@ def stage_seed_variance(
     )
 
 
+def stage_encoder_sweep(
+    encoders: Sequence[str] = (
+        "bge-large-en-v1.5",
+        "mxbai-embed-large-v1",
+        "e5-large-v2",
+        "gte-large",
+        "all-mpnet-base-v2",
+    ),
+) -> None:
+    """Is the kernel diagnosis a property of pools, or of one encoder?
+
+    The Vendi score is a functional of a similarity kernel, so every claim about
+    it is conditional on the encoder inducing that kernel. This repeats the
+    concentration diagnosis and the rank-stability check across encoder families
+    (BGE, MXBAI, E5, GTE, MPNet), so "raw kernels are near rank-1 on
+    same-question pools" can be stated as a property of the data rather than of
+    bge-large.
+    """
+    from diversity_reasoning.measurement import anisotropy_diagnostics
+    from diversity_reasoning.pools import load_cell
+
+    rows: List[Dict[str, Any]] = []
+    for model, dataset in _available_cells():
+        for encoder in encoders:
+            try:
+                pools = load_cell(CACHE, model, dataset, encoder_short=encoder)
+            except FileNotFoundError:
+                continue
+            if not any(pool.embeddings is not None for pool in pools):
+                continue
+            diagnostics = anisotropy_diagnostics(pools, n_questions=24)
+            for entry in diagnostics.get("rows", []):
+                rows.append(
+                    {
+                        "cell": f"{model}|{dataset}",
+                        "encoder": encoder,
+                        "arm": entry["label"],
+                        "scope": entry["scope"],
+                        "top_eigenvalue_share": entry["top_eigenvalue_share"],
+                        "mean_vs_1": entry["mean_vs_1"],
+                        "identical_selection_rate": entry["identical_selection_rate"],
+                        "n_questions": entry["n_questions"],
+                    }
+                )
+            for pool in pools:
+                pool.release_caches()
+    if rows:
+        _write(FIGURE_DATA / "P-A5.json", {"rows": rows})
+
+
 def stage_encoder_stability(
     model: str,
     dataset: str,
@@ -1066,7 +1116,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "stage",
-        choices=["pull", "cell", "cells", "synthetic", "assemble", "encoders", "seedvar", "all"],
+        choices=[
+            "pull", "cell", "cells", "synthetic", "assemble",
+            "encoders", "encsweep", "seedvar", "all",
+        ],
     )
     parser.add_argument("--model")
     parser.add_argument("--dataset")
@@ -1088,6 +1141,8 @@ def main() -> int:
         stage_synthetic()
     elif arguments.stage == "assemble":
         stage_assemble()
+    elif arguments.stage == "encsweep":
+        stage_encoder_sweep()
     elif arguments.stage == "seedvar":
         stage_seed_variance()
     elif arguments.stage == "encoders":
